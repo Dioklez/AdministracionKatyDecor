@@ -1,0 +1,24 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'services/auth_service.dart';
+import 'database/app_database.dart';
+import 'database/local_repository.dart';
+import 'app.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final authService = AuthService();
+  await authService.loadFromPrefs();
+  final database = AppDatabase();
+  final localRepo = LocalRepository(database);
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<AuthService>.value(value: authService),
+        Provider<AppDatabase>.value(value: database),
+        Provider<LocalRepository>.value(value: localRepo),
+      ],
+      child: KatyDecorApp(authService: authService),
+    ),
+  );
+}
