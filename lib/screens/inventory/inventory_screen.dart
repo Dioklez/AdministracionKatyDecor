@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
-import '../../database/local_repository.dart';
-import '../../widgets/sync_toast.dart';
-import '../../models/inventory_item.dart';
-import '../../models/inventory_movement.dart';
+import '../../services/inventory_item_service.dart';
+import '../../services/inventory_movement_service.dart';
+import '../../models/inventory_item_model.dart';
+import '../../models/inventory_movement_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
@@ -24,12 +21,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
   bool _loadingList = true;
   String? _listError;
 
-  int? _selectedId;
+  String? _selectedId;
   InventoryItem? _selectedItem;
   List<InventoryMovement> _movements = [];
   bool _loadingDetail = false;
 
-  String _tipoFilter = 'all'; // 'all' | 'venta' | 'material'
+  String _searchQuery = '';
   final _searchController = TextEditingController();
 
   @override
@@ -44,109 +41,43 @@ class _InventoryScreenState extends State<InventoryScreen> {
     super.dispose();
   }
 
-  Future<void> _loadItems({String q = ''}) async {
+  Future<void> _loadItems() async {
     setState(() {
       _loadingList = true;
       _listError = null;
     });
     try {
-      final api = context.read<ApiService>();
-      String endpoint = '/api/mobile/inventory';
-      final params = <String>[];
-      if (_tipoFilter != 'all') params.add('tipo=$_tipoFilter');
-      if (q.isNotEmpty) params.add('q=${Uri.encodeQueryComponent(q)}');
-      if (params.isNotEmpty) endpoint += '?${params.join('&')}';
-      final result = await api.get(endpoint);
+      final items = await InventoryItemService().getAll();
       if (!mounted) return;
-      final items = (result as List<dynamic>? ?? [])
-          .map((e) => InventoryItem.fromJson(e as Map<String, dynamic>))
-          .toList();
-      // Guardar en local (fire-and-forget, solo sin filtros)
-      if (_tipoFilter == 'all' && q.isEmpty) {
-        context.read<LocalRepository>().upsertInventoryItems(items);
-      }
       setState(() {
         _items = items;
         _loadingList = false;
         if (_selectedId != null) {
-          _selectedItem = _items.where((i) => i.id == _selectedId).firstOrNull;
+          _selectedItem =
+              _items.where((i) => i.id == _selectedId).firstOrNull;
         }
       });
-    } on ApiOfflineException {
-      await _loadItemsFromLocal(q);
     } catch (e) {
-      await _loadItemsFromLocal(q);
-    }
-  }
-
-  Future<void> _loadItemsFromLocal(String q) async {
-    try {
-      final repo = context.read<LocalRepository>();
-      final items = await repo.getInventoryFiltered(
-        tipo: _tipoFilter == 'all' ? null : _tipoFilter,
-        query: q.isEmpty ? null : q,
-      );
       if (mounted) {
         setState(() {
-          _items = items;
-          _loadingList = false;
-          if (_selectedId != null) {
-            _selectedItem = _items.where((i) => i.id == _selectedId).firstOrNull;
-          }
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _listError = 'Sin datos disponibles.';
+          _listError = 'No se pudo cargar el inventario.';
           _loadingList = false;
         });
       }
     }
   }
 
-  Future<void> _selectItem(int id) async {
+  Future<void> _selectItem(String id) async {
     setState(() {
       _selectedId = id;
-      _loadingDetail = true;
       _selectedItem = _items.where((i) => i.id == id).firstOrNull;
+      _loadingDetail = true;
       _movements = [];
     });
     try {
-      final api = context.read<ApiService>();
-      final results = await Future.wait([
-        api.get('/api/mobile/inventory/$id'),
-        api.get('/api/mobile/inventory/$id/movements'),
-      ]);
-      if (!mounted) return;
-      final item = InventoryItem.fromJson(results[0] as Map<String, dynamic>);
-      final movements = (results[1] as List<dynamic>? ?? [])
-          .map((e) => InventoryMovement.fromJson(e as Map<String, dynamic>))
-          .toList();
-      // Guardar en local (fire-and-forget)
-      final repo = context.read<LocalRepository>();
-      repo.upsertInventoryItem(item);
-      repo.upsertMovements(movements);
-      setState(() {
-        _selectedItem = item;
-        _movements = movements;
-        _loadingDetail = false;
-      });
-    } on ApiOfflineException {
-      await _loadItemDetailFromLocal(id);
-    } catch (e) {
-      await _loadItemDetailFromLocal(id);
-    }
-  }
-
-  Future<void> _loadItemDetailFromLocal(int id) async {
-    try {
-      final repo = context.read<LocalRepository>();
-      final item = await repo.getInventoryItemById(id);
-      final movements = await repo.getMovementsByItemId(id);
+      final movements = await InventoryMovementService().getByItem(id);
       if (mounted) {
         setState(() {
-          if (item != null) _selectedItem = item;
           _movements = movements;
           _loadingDetail = false;
         });
@@ -154,6 +85,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
     } catch (_) {
       if (mounted) setState(() => _loadingDetail = false);
     }
+  }
+
+  List<InventoryItem> get _filtered {
+    if (_searchQuery.isEmpty) return _items;
+    final q = _searchQuery.toLowerCase();
+    return _items.where((i) => i.name.toLowerCase().contains(q)).toList();
   }
 
   @override
@@ -203,9 +140,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
   // ── Panel izquierdo ───────────────────────────────────────────────────────
 
   Widget _buildLeftPanel() {
+    final filtered = _filtered;
     return Column(
       children: [
-        // Búsqueda
         Padding(
           padding: const EdgeInsets.all(12),
           child: TextField(
@@ -213,55 +150,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
             decoration: InputDecoration(
               hintText: 'Buscar item...',
               prefixIcon: const Icon(Icons.search, size: 18),
-              suffixIcon: _searchController.text.isNotEmpty
+              suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear, size: 16),
                       onPressed: () {
                         _searchController.clear();
-                        _loadItems();
+                        setState(() => _searchQuery = '');
                       },
                     )
                   : null,
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             ),
-            onChanged: (v) => _loadItems(q: v),
-          ),
-        ),
-        // Filtro tipo
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          child: Row(
-            children: [
-              _FilterChip(
-                label: 'Todos',
-                selected: _tipoFilter == 'all',
-                onTap: () {
-                  setState(() => _tipoFilter = 'all');
-                  _loadItems(q: _searchController.text);
-                },
-              ),
-              const SizedBox(width: 6),
-              _FilterChip(
-                label: 'Venta',
-                selected: _tipoFilter == 'venta',
-                color: AppTheme.colorPrimario,
-                onTap: () {
-                  setState(() => _tipoFilter = 'venta');
-                  _loadItems(q: _searchController.text);
-                },
-              ),
-              const SizedBox(width: 6),
-              _FilterChip(
-                label: 'Material',
-                selected: _tipoFilter == 'material',
-                color: AppTheme.colorTextoSecundario,
-                onTap: () {
-                  setState(() => _tipoFilter = 'material');
-                  _loadItems(q: _searchController.text);
-                },
-              ),
-            ],
+            onChanged: (v) => setState(() => _searchQuery = v),
           ),
         ),
         const Divider(height: 1),
@@ -273,23 +174,29 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       child: Text(_listError!,
                           style: GoogleFonts.inter(
                               color: AppTheme.colorTextoSecundario)))
-                  : _items.isEmpty
+                  : filtered.isEmpty
                       ? EmptyState(
                           icon: Icons.inventory_2_outlined,
-                          title: 'Sin items',
-                          subtitle: 'Agrega el primer item al inventario',
-                          actionLabel: 'Nuevo item',
-                          onAction: _showItemDialog,
+                          title: _searchQuery.isEmpty
+                              ? 'Sin items'
+                              : 'Sin resultados',
+                          subtitle: _searchQuery.isEmpty
+                              ? 'Agrega el primer item al inventario'
+                              : 'Intenta con otro término',
+                          actionLabel:
+                              _searchQuery.isEmpty ? 'Nuevo item' : null,
+                          onAction:
+                              _searchQuery.isEmpty ? _showItemDialog : null,
                         )
                       : ListView.builder(
-                          itemCount: _items.length,
+                          itemCount: filtered.length,
                           itemBuilder: (ctx, i) => _ItemTile(
-                            item: _items[i],
-                            selected: _selectedId == _items[i].id,
-                            onTap: () => _selectItem(_items[i].id),
+                            item: filtered[i],
+                            selected: _selectedId == filtered[i].id,
+                            onTap: () => _selectItem(filtered[i].id),
                             onEdit: () =>
-                                _showItemDialog(editItem: _items[i]),
-                            onDelete: () => _confirmDelete(_items[i]),
+                                _showItemDialog(editItem: filtered[i]),
+                            onDelete: () => _confirmDelete(filtered[i]),
                           ),
                         ),
         ),
@@ -336,14 +243,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
             actionLabel: null,
             onAction: null,
           ),
-          // Botones de acción
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: Row(
               children: [
                 OutlinedButton.icon(
                   onPressed: () =>
-                      _showMovementDialog(item, tipo: 'entrada'),
+                      _showMovementDialog(item, initialType: 'entrada'),
                   icon: const Icon(Icons.add, size: 16),
                   label: const Text('Entrada'),
                   style: OutlinedButton.styleFrom(
@@ -351,8 +257,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
-                  onPressed: item.stockActual > 0
-                      ? () => _showMovementDialog(item, tipo: 'salida')
+                  onPressed: item.currentStock > 0
+                      ? () => _showMovementDialog(item, initialType: 'salida')
                       : null,
                   icon: const Icon(Icons.remove, size: 16),
                   label: const Text('Salida'),
@@ -362,7 +268,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
                   onPressed: () =>
-                      _showMovementDialog(item, tipo: 'ajuste'),
+                      _showMovementDialog(item, initialType: 'ajuste'),
                   icon: const Icon(Icons.tune, size: 16),
                   label: const Text('Ajuste'),
                   style: OutlinedButton.styleFrom(
@@ -403,16 +309,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      item.nombre,
+                      item.name,
                       style: GoogleFonts.inter(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.colorTexto,
                       ),
                     ),
-                    if (item.codigo != null) ...[
+                    if (item.description != null) ...[
                       const SizedBox(height: 2),
-                      Text('Código: ${item.codigo}',
+                      Text(item.description!,
                           style: GoogleFonts.inter(
                               fontSize: 12,
                               color: AppTheme.colorTextoSecundario)),
@@ -462,7 +368,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               _StatCell(
                 label: 'Stock actual',
                 value:
-                    '${item.stockActual.toStringAsFixed(item.stockActual == item.stockActual.roundToDouble() ? 0 : 2)} ${item.unidad}',
+                    '${item.currentStock.toStringAsFixed(item.currentStock == item.currentStock.roundToDouble() ? 0 : 2)} ${item.unit ?? ''}',
                 color: item.isBajoStock
                     ? AppTheme.colorError
                     : AppTheme.colorTexto,
@@ -470,23 +376,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
               const SizedBox(width: 24),
               _StatCell(
                 label: 'Stock mínimo',
-                value: item.stockMinimo != null
-                    ? '${item.stockMinimo!.toStringAsFixed(0)} ${item.unidad}'
+                value: item.minStock != null
+                    ? '${item.minStock!.toStringAsFixed(0)} ${item.unit ?? ''}'
                     : '—',
                 color: AppTheme.colorTextoSecundario,
               ),
-              const SizedBox(width: 24),
-              _StatCell(
-                label: 'Precio unitario',
-                value: '\$${item.precioUnitario.toStringAsFixed(2)}',
-                color: AppTheme.colorTexto,
-              ),
-              const SizedBox(width: 24),
-              _StatCell(
-                label: 'Valor total',
-                value: '\$${item.valorTotal.toStringAsFixed(2)}',
-                color: AppTheme.colorPrimario,
-              ),
+              if (item.location != null) ...[
+                const SizedBox(width: 24),
+                _StatCell(
+                  label: 'Ubicación',
+                  value: item.location!,
+                  color: AppTheme.colorTextoSecundario,
+                ),
+              ],
             ],
           ),
         ],
@@ -537,7 +439,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 ),
                 Expanded(
                   flex: 3,
-                  child: Text('Referencia',
+                  child: Text('Notas',
                       style: GoogleFonts.inter(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -557,11 +459,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
   void _showItemDialog({InventoryItem? editItem}) {
     showDialog(
       context: context,
-      builder: (ctx) => _NewItemDialog(
+      builder: (ctx) => _ItemDialog(
         editItem: editItem,
         onSaved: () {
           Navigator.of(ctx).pop();
-          _loadItems(q: _searchController.text).then((_) {
+          _loadItems().then((_) {
             final id = editItem?.id ?? _selectedId;
             if (id != null) _selectItem(id);
           });
@@ -570,16 +472,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  void _showMovementDialog(InventoryItem item, {required String tipo}) {
+  void _showMovementDialog(InventoryItem item,
+      {required String initialType}) {
     showDialog(
       context: context,
-      builder: (ctx) => _NewMovementDialog(
+      builder: (ctx) => _MovementDialog(
         item: item,
-        initialTipo: tipo,
+        initialType: initialType,
         onSaved: () {
           Navigator.of(ctx).pop();
-          _loadItems(q: _searchController.text)
-              .then((_) => _selectItem(item.id));
+          _loadItems().then((_) => _selectItem(item.id));
         },
       ),
     );
@@ -589,10 +491,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('¿Eliminar "${item.nombre}"?',
-            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
-        content: Text(
-            'El item quedará inactivo y no aparecerá en el inventario.',
+        title: Text('¿Eliminar "${item.name}"?',
+            style:
+                GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
+        content: Text('Esta acción no se puede deshacer.',
             style: GoogleFonts.inter(fontSize: 13)),
         actions: [
           TextButton(
@@ -610,35 +512,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await context
-            .read<ApiService>()
-            .delete('/api/mobile/inventory/${item.id}');
-        setState(() {
-          if (_selectedId == item.id) {
-            _selectedId = null;
-            _selectedItem = null;
-            _movements = [];
-          }
-        });
-        _loadItems(q: _searchController.text);
-      } on ApiOfflineException {
-        final repo = context.read<LocalRepository>();
-        await repo.addPendingOp(
-          entityType: 'inventory_item',
-          operation: 'delete',
-          entityId: item.id,
-          endpoint: '/api/mobile/inventory/${item.id}',
-        );
-        repo.deleteInventoryItem(item.id);
-        setState(() {
-          _items.removeWhere((x) => x.id == item.id);
-          if (_selectedId == item.id) {
-            _selectedId = null;
-            _selectedItem = null;
-            _movements = [];
-          }
-        });
-        SyncToast.show(context, 'Eliminado localmente. Se sincronizará al reconectar.');
+        await InventoryItemService().delete(item.id);
+        if (mounted) {
+          setState(() {
+            if (_selectedId == item.id) {
+              _selectedId = null;
+              _selectedItem = null;
+              _movements = [];
+            }
+          });
+          _loadItems();
+        }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -647,50 +531,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
         }
       }
     }
-  }
-}
-
-// ── Filter chip ───────────────────────────────────────────────────────────────
-
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final Color? color;
-  final VoidCallback onTap;
-
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = color ?? AppTheme.colorPrimario;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: selected ? c.withAlpha(30) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected ? c : AppTheme.colorBorde,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 12,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            color: selected ? c : AppTheme.colorTextoSecundario,
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -755,7 +595,7 @@ class _ItemTileState extends State<_ItemTile> {
                       children: [
                         Expanded(
                           child: Text(
-                            item.nombre,
+                            item.name,
                             style: GoogleFonts.inter(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -783,32 +623,13 @@ class _ItemTileState extends State<_ItemTile> {
                       ],
                     ),
                     const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        Text(
-                          'Stock: ${item.stockActual.toStringAsFixed(item.stockActual == item.stockActual.roundToDouble() ? 0 : 2)} ${item.unidad}',
-                          style: GoogleFonts.inter(
-                              fontSize: 11,
-                              color: item.isBajoStock
-                                  ? AppTheme.colorError
-                                  : AppTheme.colorTextoSecundario),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: AppTheme.colorBorde,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            item.tipo == 'venta' ? 'Venta' : 'Material',
-                            style: GoogleFonts.inter(
-                                fontSize: 9,
-                                color: AppTheme.colorTextoSecundario),
-                          ),
-                        ),
-                      ],
+                    Text(
+                      'Stock: ${item.currentStock.toStringAsFixed(item.currentStock == item.currentStock.roundToDouble() ? 0 : 2)}${item.unit != null ? ' ${item.unit}' : ''}',
+                      style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: item.isBajoStock
+                              ? AppTheme.colorError
+                              : AppTheme.colorTextoSecundario),
                     ),
                   ],
                 ),
@@ -847,8 +668,8 @@ class _MovementRow extends StatelessWidget {
     return iso;
   }
 
-  Color _tipoColor(String tipo) {
-    switch (tipo) {
+  Color _typeColor(String type) {
+    switch (type) {
       case 'entrada':
         return AppTheme.colorExito;
       case 'salida':
@@ -858,8 +679,8 @@ class _MovementRow extends StatelessWidget {
     }
   }
 
-  String _tipoLabel(String tipo) {
-    switch (tipo) {
+  String _typeLabel(String type) {
+    switch (type) {
       case 'entrada':
         return 'Entrada';
       case 'salida':
@@ -872,7 +693,7 @@ class _MovementRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final m = movement;
-    final color = _tipoColor(m.tipo);
+    final color = _typeColor(m.type);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
@@ -882,7 +703,7 @@ class _MovementRow extends StatelessWidget {
         children: [
           Expanded(
             flex: 2,
-            child: Text(_formatDate(m.fecha),
+            child: Text(_formatDate(m.date),
                 style: GoogleFonts.inter(
                     fontSize: 13, color: AppTheme.colorTextoSecundario)),
           ),
@@ -895,7 +716,7 @@ class _MovementRow extends StatelessWidget {
                 color: color.withAlpha(25),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Text(_tipoLabel(m.tipo),
+              child: Text(_typeLabel(m.type),
                   style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -905,7 +726,7 @@ class _MovementRow extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              '${m.tipo == 'salida' ? '-' : '+'}${m.cantidad.toStringAsFixed(m.cantidad == m.cantidad.roundToDouble() ? 0 : 2)}',
+              '${m.type == 'salida' ? '-' : '+'}${m.quantity.toStringAsFixed(m.quantity == m.quantity.roundToDouble() ? 0 : 2)}',
               textAlign: TextAlign.right,
               style: GoogleFonts.inter(
                   fontSize: 13,
@@ -917,7 +738,7 @@ class _MovementRow extends StatelessWidget {
             flex: 3,
             child: Padding(
               padding: const EdgeInsets.only(left: 12),
-              child: Text(m.referencia ?? '—',
+              child: Text(m.notes ?? '—',
                   style: GoogleFonts.inter(
                       fontSize: 12, color: AppTheme.colorTextoSecundario),
                   overflow: TextOverflow.ellipsis),
@@ -957,59 +778,51 @@ class _StatCell extends StatelessWidget {
 
 // ── Dialog: Nuevo / Editar item ───────────────────────────────────────────────
 
-class _NewItemDialog extends StatefulWidget {
+class _ItemDialog extends StatefulWidget {
   final VoidCallback onSaved;
   final InventoryItem? editItem;
 
-  const _NewItemDialog({required this.onSaved, this.editItem});
+  const _ItemDialog({required this.onSaved, this.editItem});
 
   @override
-  State<_NewItemDialog> createState() => _NewItemDialogState();
+  State<_ItemDialog> createState() => _ItemDialogState();
 }
 
-class _NewItemDialogState extends State<_NewItemDialog> {
+class _ItemDialogState extends State<_ItemDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _nombreController = TextEditingController();
-  final _codigoController = TextEditingController();
-  final _stockController = TextEditingController();
-  final _stockMinimoController = TextEditingController();
-  final _precioController = TextEditingController();
-  final _notasController = TextEditingController();
-  String _tipo = 'venta';
-  String _unidad = 'pieza';
+  final _nameController = TextEditingController();
+  final _unitController = TextEditingController();
+  final _minStockController = TextEditingController();
+  final _locationController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _notesController = TextEditingController();
   bool _saving = false;
   String? _error;
 
   bool get _isEditing => widget.editItem != null;
-
-  static const _unidades = [
-    'pieza', 'metro', 'metro cuadrado', 'kg', 'gramo', 'litro', 'ml',
-    'par', 'caja', 'rollo', 'otro',
-  ];
 
   @override
   void initState() {
     super.initState();
     final item = widget.editItem;
     if (item != null) {
-      _nombreController.text = item.nombre;
-      _codigoController.text = item.codigo ?? '';
-      _stockMinimoController.text = item.stockMinimo?.toStringAsFixed(0) ?? '';
-      _precioController.text = item.precioUnitario.toStringAsFixed(2);
-      _notasController.text = item.notas ?? '';
-      _tipo = item.tipo;
-      _unidad = _unidades.contains(item.unidad) ? item.unidad : 'pieza';
+      _nameController.text = item.name;
+      _unitController.text = item.unit ?? '';
+      _minStockController.text = item.minStock?.toStringAsFixed(0) ?? '';
+      _locationController.text = item.location ?? '';
+      _descriptionController.text = item.description ?? '';
+      _notesController.text = item.notes ?? '';
     }
   }
 
   @override
   void dispose() {
-    _nombreController.dispose();
-    _codigoController.dispose();
-    _stockController.dispose();
-    _stockMinimoController.dispose();
-    _precioController.dispose();
-    _notasController.dispose();
+    _nameController.dispose();
+    _unitController.dispose();
+    _minStockController.dispose();
+    _locationController.dispose();
+    _descriptionController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
@@ -1019,82 +832,22 @@ class _NewItemDialogState extends State<_NewItemDialog> {
       _saving = true;
       _error = null;
     });
-    final stockMin = double.tryParse(_stockMinimoController.text);
-    final body = <String, dynamic>{
-      'nombre': _nombreController.text.trim(),
-      'tipo': _tipo,
-      'unidad': _unidad,
-      'precio_unitario': double.parse(_precioController.text),
-      'stock_minimo': stockMin,
-      if (_codigoController.text.isNotEmpty)
-        'codigo': _codigoController.text.trim(),
-      if (_notasController.text.isNotEmpty)
-        'notas': _notasController.text.trim(),
+    final minStock = double.tryParse(_minStockController.text.trim());
+    final data = {
+      'name': _nameController.text.trim(),
+      'unit': _unitController.text.trim(),
+      'minStock': minStock,
+      'location': _locationController.text.trim(),
+      'description': _descriptionController.text.trim(),
+      'notes': _notesController.text.trim(),
     };
     try {
-      final api = context.read<ApiService>();
       if (_isEditing) {
-        await api.put('/api/mobile/inventory/${widget.editItem!.id}', body);
+        await InventoryItemService().update(widget.editItem!.id, data);
       } else {
-        body['stock_actual'] =
-            double.tryParse(_stockController.text) ?? 0.0;
-        await api.post('/api/mobile/inventory', body);
+        await InventoryItemService().create(data);
       }
       if (mounted) widget.onSaved();
-    } on ApiOfflineException {
-      if (!mounted) return;
-      final repo = context.read<LocalRepository>();
-      final precio = double.parse(_precioController.text);
-      final stockMin = double.tryParse(_stockMinimoController.text);
-      if (_isEditing) {
-        final ei = widget.editItem!;
-        await repo.addPendingOp(
-          entityType: 'inventory_item',
-          operation: 'update',
-          entityId: ei.id,
-          endpoint: '/api/mobile/inventory/${ei.id}',
-          payload: jsonEncode(body),
-        );
-        repo.upsertInventoryItem(InventoryItem(
-          id: ei.id,
-          codigo: _codigoController.text.isEmpty ? null : _codigoController.text.trim(),
-          nombre: _nombreController.text.trim(),
-          tipo: _tipo,
-          unidad: _unidad,
-          stockActual: ei.stockActual,
-          stockMinimo: stockMin,
-          precioUnitario: precio,
-          activo: ei.activo,
-          notas: _notasController.text.isEmpty ? null : _notasController.text.trim(),
-          valorTotal: ei.stockActual * precio,
-        ));
-      } else {
-        final stockActual = double.tryParse(_stockController.text) ?? 0.0;
-        final tempId = -DateTime.now().millisecondsSinceEpoch;
-        body['stock_actual'] = stockActual;
-        await repo.addPendingOp(
-          entityType: 'inventory_item',
-          operation: 'create',
-          tempId: tempId,
-          endpoint: '/api/mobile/inventory',
-          payload: jsonEncode(body),
-        );
-        repo.upsertInventoryItem(InventoryItem(
-          id: tempId,
-          codigo: _codigoController.text.isEmpty ? null : _codigoController.text.trim(),
-          nombre: _nombreController.text.trim(),
-          tipo: _tipo,
-          unidad: _unidad,
-          stockActual: stockActual,
-          stockMinimo: stockMin,
-          precioUnitario: precio,
-          activo: true,
-          notas: _notasController.text.isEmpty ? null : _notasController.text.trim(),
-          valorTotal: stockActual * precio,
-        ));
-      }
-      SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-      widget.onSaved();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -1122,72 +875,26 @@ class _NewItemDialogState extends State<_NewItemDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Nombre
                 TextFormField(
-                  controller: _nombreController,
+                  controller: _nameController,
                   decoration: const InputDecoration(labelText: 'Nombre *'),
                   validator: (v) =>
                       v == null || v.trim().isEmpty ? 'Requerido' : null,
                 ),
                 const SizedBox(height: 10),
-                // Código + tipo
                 Row(
                   children: [
                     Expanded(
                       child: TextFormField(
-                        controller: _codigoController,
+                        controller: _unitController,
                         decoration:
-                            const InputDecoration(labelText: 'Código (opcional)'),
+                            const InputDecoration(labelText: 'Unidad'),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _tipo,
-                        items: const [
-                          DropdownMenuItem(
-                              value: 'venta', child: Text('Venta')),
-                          DropdownMenuItem(
-                              value: 'material', child: Text('Material')),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) setState(() => _tipo = v);
-                        },
-                        decoration: const InputDecoration(labelText: 'Tipo'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                // Unidad
-                DropdownButtonFormField<String>(
-                  initialValue: _unidad,
-                  items: _unidades
-                      .map((u) =>
-                          DropdownMenuItem(value: u, child: Text(u)))
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setState(() => _unidad = v);
-                  },
-                  decoration: const InputDecoration(labelText: 'Unidad'),
-                ),
-                const SizedBox(height: 10),
-                // Stock inicial (solo creación) + Stock mínimo
-                Row(
-                  children: [
-                    if (!_isEditing)
-                      Expanded(
-                        child: TextFormField(
-                          controller: _stockController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                              labelText: 'Stock inicial'),
-                        ),
-                      ),
-                    if (!_isEditing) const SizedBox(width: 12),
-                    Expanded(
                       child: TextFormField(
-                        controller: _stockMinimoController,
+                        controller: _minStockController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                             labelText: 'Stock mínimo (alerta)'),
@@ -1196,21 +903,21 @@ class _NewItemDialogState extends State<_NewItemDialog> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                // Precio
                 TextFormField(
-                  controller: _precioController,
-                  keyboardType: TextInputType.number,
+                  controller: _locationController,
                   decoration:
-                      const InputDecoration(labelText: 'Precio unitario *'),
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return 'Requerido';
-                    if (double.tryParse(v) == null) return 'Número inválido';
-                    return null;
-                  },
+                      const InputDecoration(labelText: 'Ubicación (opcional)'),
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
-                  controller: _notasController,
+                  controller: _descriptionController,
+                  decoration:
+                      const InputDecoration(labelText: 'Descripción (opcional)'),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: _notesController,
                   decoration:
                       const InputDecoration(labelText: 'Notas (opcional)'),
                   maxLines: 2,
@@ -1248,40 +955,40 @@ class _NewItemDialogState extends State<_NewItemDialog> {
 
 // ── Dialog: Registrar movimiento ──────────────────────────────────────────────
 
-class _NewMovementDialog extends StatefulWidget {
+class _MovementDialog extends StatefulWidget {
   final InventoryItem item;
-  final String initialTipo;
+  final String initialType;
   final VoidCallback onSaved;
 
-  const _NewMovementDialog({
+  const _MovementDialog({
     required this.item,
-    required this.initialTipo,
+    required this.initialType,
     required this.onSaved,
   });
 
   @override
-  State<_NewMovementDialog> createState() => _NewMovementDialogState();
+  State<_MovementDialog> createState() => _MovementDialogState();
 }
 
-class _NewMovementDialogState extends State<_NewMovementDialog> {
+class _MovementDialogState extends State<_MovementDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _cantidadController = TextEditingController();
-  final _referenciaController = TextEditingController();
-  late String _tipo;
-  DateTime _fecha = DateTime.now();
+  final _quantityController = TextEditingController();
+  final _notesController = TextEditingController();
+  late String _type;
+  DateTime _date = DateTime.now();
   bool _saving = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _tipo = widget.initialTipo;
+    _type = widget.initialType;
   }
 
   @override
   void dispose() {
-    _cantidadController.dispose();
-    _referenciaController.dispose();
+    _quantityController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
@@ -1291,14 +998,14 @@ class _NewMovementDialogState extends State<_NewMovementDialog> {
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: _fecha,
+      initialDate: _date,
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
     );
-    if (picked != null && mounted) setState(() => _fecha = picked);
+    if (picked != null && mounted) setState(() => _date = picked);
   }
 
-  String _tipoLabel(String t) {
+  String _typeLabel(String t) {
     switch (t) {
       case 'entrada':
         return 'Entrada (agrega stock)';
@@ -1315,83 +1022,24 @@ class _NewMovementDialogState extends State<_NewMovementDialog> {
       _saving = true;
       _error = null;
     });
+    final quantity = double.parse(_quantityController.text);
+    if (_type == 'salida' && quantity > widget.item.currentStock) {
+      setState(() {
+        _error =
+            'Stock insuficiente. Disponible: ${widget.item.currentStock.toStringAsFixed(2)}';
+        _saving = false;
+      });
+      return;
+    }
     try {
-      final api = context.read<ApiService>();
-      final cantidad = double.parse(_cantidadController.text);
-      if (_tipo == 'salida' && cantidad > widget.item.stockActual) {
-        setState(() {
-          _error =
-              'Stock insuficiente. Disponible: ${widget.item.stockActual.toStringAsFixed(2)}';
-          _saving = false;
-        });
-        return;
-      }
-      final movBody = {
-        'tipo': _tipo,
-        'cantidad': cantidad,
-        'fecha': _fecha.toIso8601String().substring(0, 10),
-        if (_referenciaController.text.isNotEmpty)
-          'referencia': _referenciaController.text.trim(),
-      };
-      await api.post('/api/mobile/inventory/${widget.item.id}/movements', movBody);
+      await InventoryMovementService().create({
+        'inventoryItemId': widget.item.id,
+        'type': _type,
+        'quantity': quantity,
+        'date': _date.toIso8601String().substring(0, 10),
+        'notes': _notesController.text.trim(),
+      });
       if (mounted) widget.onSaved();
-    } on ApiOfflineException {
-      if (!mounted) return;
-      final cantidad = double.parse(_cantidadController.text);
-      final repo = context.read<LocalRepository>();
-      final tempId = -DateTime.now().millisecondsSinceEpoch;
-      await repo.addPendingOp(
-        entityType: 'inventory_movement',
-        operation: 'create',
-        tempId: tempId,
-        endpoint: '/api/mobile/inventory/${widget.item.id}/movements',
-        payload: jsonEncode({
-          'tipo': _tipo,
-          'cantidad': cantidad,
-          'fecha': _fecha.toIso8601String().substring(0, 10),
-          if (_referenciaController.text.isNotEmpty)
-            'referencia': _referenciaController.text.trim(),
-        }),
-      );
-      // Actualizar stock optimistamente
-      double nuevoStock;
-      if (_tipo == 'entrada') {
-        nuevoStock = widget.item.stockActual + cantidad;
-      } else if (_tipo == 'salida') {
-        nuevoStock = widget.item.stockActual - cantidad;
-      } else {
-        nuevoStock = cantidad; // ajuste
-      }
-      repo.upsertInventoryItem(InventoryItem(
-        id: widget.item.id,
-        codigo: widget.item.codigo,
-        nombre: widget.item.nombre,
-        descripcion: widget.item.descripcion,
-        tipo: widget.item.tipo,
-        categoria: widget.item.categoria,
-        unidad: widget.item.unidad,
-        stockActual: nuevoStock,
-        stockMinimo: widget.item.stockMinimo,
-        precioUnitario: widget.item.precioUnitario,
-        proveedorId: widget.item.proveedorId,
-        activo: widget.item.activo,
-        notas: widget.item.notas,
-        valorTotal: nuevoStock * widget.item.precioUnitario,
-      ));
-      repo.upsertMovements([
-        InventoryMovement(
-          id: tempId,
-          itemId: widget.item.id,
-          tipo: _tipo,
-          cantidad: cantidad,
-          fecha: _fecha.toIso8601String().substring(0, 10),
-          referencia: _referenciaController.text.isEmpty
-              ? null
-              : _referenciaController.text.trim(),
-        ),
-      ]);
-      SyncToast.show(context, 'Movimiento guardado localmente. Se sincronizará al reconectar.');
-      widget.onSaved();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -1415,28 +1063,29 @@ class _NewMovementDialogState extends State<_NewMovementDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '${widget.item.nombre} — Stock: ${widget.item.stockActual.toStringAsFixed(2)} ${widget.item.unidad}',
+                '${widget.item.name} — Stock: ${widget.item.currentStock.toStringAsFixed(2)}${widget.item.unit != null ? ' ${widget.item.unit}' : ''}',
                 style: GoogleFonts.inter(
                     fontSize: 13, color: AppTheme.colorTextoSecundario),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                initialValue: _tipo,
+                value: _type,
                 items: ['entrada', 'salida', 'ajuste']
                     .map((t) => DropdownMenuItem(
-                        value: t, child: Text(_tipoLabel(t))))
+                        value: t, child: Text(_typeLabel(t))))
                     .toList(),
                 onChanged: (v) {
-                  if (v != null) setState(() => _tipo = v);
+                  if (v != null) setState(() => _type = v);
                 },
                 decoration: const InputDecoration(labelText: 'Tipo'),
               ),
               const SizedBox(height: 10),
               TextFormField(
-                controller: _cantidadController,
-                keyboardType: TextInputType.number,
+                controller: _quantityController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
-                  labelText: _tipo == 'ajuste'
+                  labelText: _type == 'ajuste'
                       ? 'Nuevo stock total *'
                       : 'Cantidad *',
                 ),
@@ -1452,15 +1101,15 @@ class _NewMovementDialogState extends State<_NewMovementDialog> {
                 onTap: _pickDate,
                 child: InputDecorator(
                   decoration: const InputDecoration(labelText: 'Fecha'),
-                  child: Text(_formatDate(_fecha),
+                  child: Text(_formatDate(_date),
                       style: GoogleFonts.inter(fontSize: 14)),
                 ),
               ),
               const SizedBox(height: 10),
               TextFormField(
-                controller: _referenciaController,
+                controller: _notesController,
                 decoration: const InputDecoration(
-                    labelText: 'Referencia / motivo (opcional)'),
+                    labelText: 'Notas / motivo (opcional)'),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 10),

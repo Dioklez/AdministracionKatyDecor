@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/supplier_service.dart';
+import '../../services/supplier_product_service.dart';
 import '../../models/supplier_model.dart';
+import '../../models/supplier_product_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
@@ -19,6 +21,8 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   String? _listError;
 
   String? _selectedId;
+  List<SupplierProduct> _products = [];
+  bool _loadingProducts = false;
   final _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -57,7 +61,27 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   }
 
   void _selectSupplier(String id) {
-    setState(() => _selectedId = id);
+    setState(() {
+      _selectedId = id;
+      _products = [];
+    });
+    _loadProducts(id);
+  }
+
+  Future<void> _loadProducts(String supplierId) async {
+    setState(() => _loadingProducts = true);
+    try {
+      final products =
+          await SupplierProductService().getBySupplier(supplierId);
+      if (mounted) {
+        setState(() {
+          _products = products;
+          _loadingProducts = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingProducts = false);
+    }
   }
 
   Supplier? get _selectedSupplier =>
@@ -307,12 +331,157 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                   fontSize: 13, color: AppTheme.colorTextoSecundario),
             ),
           ],
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Text(
+                'Productos',
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.colorTexto,
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                icon: const Icon(Icons.add, size: 14),
+                label: const Text('Agregar'),
+                onPressed: () => _showProductDialog(supplierId: s.id),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_loadingProducts)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                  child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else if (_products.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Sin productos registrados.',
+                style: GoogleFonts.inter(
+                    fontSize: 13, color: AppTheme.colorTextoSecundario),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _products.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                final p = _products[i];
+                return ListTile(
+                  dense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                  title: Text(
+                    p.name,
+                    style: GoogleFonts.inter(
+                        fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: Text(
+                    [
+                      if (p.sku != null) 'SKU: ${p.sku}',
+                      if (p.unit != null) p.unit!,
+                    ].join(' · '),
+                    style: GoogleFonts.inter(
+                        fontSize: 11, color: AppTheme.colorTextoSecundario),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '\$${p.price.toStringAsFixed(2)}',
+                        style: GoogleFonts.inter(
+                            fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      PopupMenuButton<String>(
+                        icon: Icon(Icons.more_vert,
+                            size: 16, color: AppTheme.colorTextoSecundario),
+                        onSelected: (v) {
+                          if (v == 'edit') {
+                            _showProductDialog(
+                                supplierId: s.id, editProduct: p);
+                          }
+                          if (v == 'delete') _confirmDeleteProduct(p);
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'edit', child: Text('Editar')),
+                          PopupMenuItem(
+                              value: 'delete', child: Text('Eliminar')),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );
   }
 
   // ── Diálogos ──────────────────────────────────────────────────────────────
+
+  void _showProductDialog(
+      {required String supplierId, SupplierProduct? editProduct}) {
+    showDialog(
+      context: context,
+      builder: (ctx) => _SupplierProductDialog(
+        supplierId: supplierId,
+        editProduct: editProduct,
+        onSaved: () {
+          Navigator.of(ctx).pop();
+          _loadProducts(supplierId);
+        },
+      ),
+    );
+  }
+
+  Future<void> _confirmDeleteProduct(SupplierProduct p) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('¿Eliminar "${p.name}"?',
+            style:
+                GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
+        content: Text('Esta acción no se puede deshacer.',
+            style: GoogleFonts.inter(fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: AppTheme.colorError),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      try {
+        await SupplierProductService().delete(p.id);
+        if (mounted) _loadProducts(p.supplierId);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo eliminar el producto.')),
+          );
+        }
+      }
+    }
+  }
 
   void _showSupplierDialog({Supplier? editSupplier}) {
     showDialog(
@@ -514,6 +683,196 @@ class _InfoChip extends StatelessWidget {
         Text(label,
             style: GoogleFonts.inter(
                 fontSize: 12, color: AppTheme.colorTextoSecundario)),
+      ],
+    );
+  }
+}
+
+// ── Dialog: Nuevo / Editar producto de proveedor ─────────────────────────────
+
+class _SupplierProductDialog extends StatefulWidget {
+  final String supplierId;
+  final SupplierProduct? editProduct;
+  final VoidCallback onSaved;
+
+  const _SupplierProductDialog({
+    required this.supplierId,
+    this.editProduct,
+    required this.onSaved,
+  });
+
+  @override
+  State<_SupplierProductDialog> createState() =>
+      _SupplierProductDialogState();
+}
+
+class _SupplierProductDialogState extends State<_SupplierProductDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _skuController = TextEditingController();
+  final _unitController = TextEditingController();
+  final _priceController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  bool _isActive = true;
+  bool _saving = false;
+  String? _error;
+
+  bool get _isEditing => widget.editProduct != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.editProduct;
+    if (p != null) {
+      _nameController.text = p.name;
+      _skuController.text = p.sku ?? '';
+      _unitController.text = p.unit ?? '';
+      _priceController.text = p.price > 0 ? p.price.toString() : '';
+      _descriptionController.text = p.description ?? '';
+      _isActive = p.isActive;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _skuController.dispose();
+    _unitController.dispose();
+    _priceController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final price = double.tryParse(_priceController.text.trim()) ?? 0.0;
+    final data = {
+      'supplierId': widget.supplierId,
+      'name': _nameController.text.trim(),
+      'sku': _skuController.text.trim(),
+      'unit': _unitController.text.trim(),
+      'price': price,
+      'description': _descriptionController.text.trim(),
+      'isActive': _isActive,
+    };
+    try {
+      if (_isEditing) {
+        await SupplierProductService().update(widget.editProduct!.id, data);
+      } else {
+        await SupplierProductService().create(data);
+      }
+      if (mounted) widget.onSaved();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = _isEditing
+              ? 'No se pudo guardar los cambios.'
+              : 'No se pudo crear el producto.';
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        _isEditing ? 'Editar producto' : 'Nuevo producto',
+        style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
+      ),
+      content: SizedBox(
+        width: 400,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(labelText: 'Nombre *'),
+                  validator: (v) =>
+                      v == null || v.trim().isEmpty ? 'Requerido' : null,
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _skuController,
+                        decoration: const InputDecoration(labelText: 'SKU'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _unitController,
+                        decoration:
+                            const InputDecoration(labelText: 'Unidad'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: _priceController,
+                  decoration:
+                      const InputDecoration(labelText: 'Precio (MXN)'),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: _descriptionController,
+                  decoration:
+                      const InputDecoration(labelText: 'Descripción (opcional)'),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Text('Activo',
+                        style: GoogleFonts.inter(
+                            fontSize: 13, color: AppTheme.colorTexto)),
+                    const Spacer(),
+                    Switch(
+                      value: _isActive,
+                      onChanged: (v) => setState(() => _isActive = v),
+                      activeThumbColor: AppTheme.colorPrimario,
+                    ),
+                  ],
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(_error!,
+                      style: GoogleFonts.inter(
+                          color: AppTheme.colorError, fontSize: 13)),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : Text(_isEditing ? 'Guardar cambios' : 'Crear producto'),
+        ),
       ],
     );
   }

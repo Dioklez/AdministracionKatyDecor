@@ -1,7 +1,5 @@
 import 'dart:convert';
 import '../database/local_repository.dart';
-import '../models/inventory_item.dart';
-import '../models/inventory_movement.dart';
 import 'api_service.dart';
 
 class SyncService {
@@ -26,8 +24,6 @@ class SyncService {
       pushed = pushResult.pushed;
       errors.addAll(pushResult.errors);
 
-      // 2. Pull todo en paralelo
-      await _pullAll(errors);
     } catch (e) {
       errors.add('fullSync: $e');
     } finally {
@@ -130,52 +126,6 @@ class SyncService {
     return _PushResult(pushed: pushed, errors: errors);
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // PULL
-  // ─────────────────────────────────────────────────────────────────────
-
-  Future<void> _pullAll(List<String> errors) async {
-    final futures = [
-      _safePull('inventory', errors, _pullInventory),
-      _safePull('chart', errors, _pullChartData),
-    ];
-
-    await Future.wait(futures);
-  }
-
-  Future<void> _safePull(
-      String name, List<String> errors, Future<void> Function() fn) async {
-    try {
-      await fn();
-    } on ApiOfflineException {
-      errors.add('pull/$name: offline');
-    } catch (e) {
-      errors.add('pull/$name: $e');
-    }
-  }
-
-  Future<void> _pullInventory() async {
-    final data = await _api.get('/api/mobile/inventory');
-    final list = (data as List)
-        .map((e) => InventoryItem.fromJson(e as Map<String, dynamic>))
-        .toList();
-    await _repo.upsertInventoryItems(list);
-  }
-
-  Future<void> _pullChartData() async {
-    final data = await _api.get('/api/graficas/ingreso-egreso');
-    await _repo.setCacheEntry('graficas/ingreso-egreso', jsonEncode(data));
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // HELPERS PÚBLICOS para uso en pantallas
-  // ─────────────────────────────────────────────────────────────────────
-
-  /// Guarda movimientos de inventario en local después de cargarlos.
-  Future<void> cacheInventoryMovements(
-      int itemId, List<InventoryMovement> movements) async {
-    await _repo.upsertMovements(movements);
-  }
 }
 
 class SyncResult {

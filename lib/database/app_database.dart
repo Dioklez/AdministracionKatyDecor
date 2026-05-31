@@ -6,44 +6,6 @@ import 'package:path/path.dart' as p;
 
 part 'app_database.g.dart';
 
-// ── Inventario ─────────────────────────────────────────────────────────────
-@DataClassName('InventoryItemRow')
-class InventoryItems extends Table {
-  IntColumn get id => integer()();
-  TextColumn get codigo => text().nullable()();
-  TextColumn get nombre => text()();
-  TextColumn get descripcion => text().nullable()();
-  TextColumn get tipo => text()();
-  TextColumn get categoria => text().nullable()();
-  TextColumn get unidad => text().withDefault(const Constant('pieza'))();
-  RealColumn get stockActual => real().withDefault(const Constant(0.0))();
-  RealColumn get stockMinimo => real().nullable()();
-  RealColumn get precioUnitario => real().withDefault(const Constant(0.0))();
-  IntColumn get proveedorId => integer().nullable()();
-  BoolColumn get activo => boolean().withDefault(const Constant(true))();
-  TextColumn get notas => text().nullable()();
-  RealColumn get valorTotal => real().withDefault(const Constant(0.0))();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
-// ── Movimientos de inventario ──────────────────────────────────────────────
-@DataClassName('InventoryMovementRow')
-class InventoryMovements extends Table {
-  IntColumn get id => integer()();
-  IntColumn get itemId => integer()();
-  TextColumn get tipo => text()();
-  RealColumn get cantidad => real()();
-  RealColumn get precioUnitario => real().nullable()();
-  TextColumn get referencia => text().nullable()();
-  TextColumn get fecha => text().nullable()();
-  TextColumn get createdAt => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
 // ── Cola de operaciones pendientes ─────────────────────────────────────────
 class PendingOps extends Table {
   IntColumn get id => integer().autoIncrement()();
@@ -70,8 +32,6 @@ class CacheEntries extends Table {
 
 // ── Base de datos ──────────────────────────────────────────────────────────
 @DriftDatabase(tables: [
-  InventoryItems,
-  InventoryMovements,
   PendingOps,
   CacheEntries,
 ])
@@ -79,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -89,6 +49,11 @@ class AppDatabase extends _$AppDatabase {
             await customStatement('DROP TABLE IF EXISTS transactions');
             await customStatement('DROP TABLE IF EXISTS quotes');
             await customStatement('DROP TABLE IF EXISTS budgets');
+          }
+          // v2→v3: tablas inventory_items, inventory_movements eliminadas (migradas a PocketBase)
+          if (from < 3) {
+            await customStatement('DROP TABLE IF EXISTS inventory_items');
+            await customStatement('DROP TABLE IF EXISTS inventory_movements');
           }
         },
       );
