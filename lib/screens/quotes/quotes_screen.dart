@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
+import '../../services/quote_service.dart';
 import '../../services/project_service.dart';
-import '../../database/local_repository.dart';
-import '../../widgets/sync_toast.dart';
-import '../../models/quote.dart';
+import '../../models/quote_model.dart';
 import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
@@ -41,57 +37,19 @@ class _QuotesScreenState extends State<QuotesScreen> {
       _error = null;
     });
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
-
-      String quoteEndpoint = '/api/mobile/quotes';
-      if (_projectFilter != null) {
-        quoteEndpoint += '?project_id=$_projectFilter';
-      }
-
       final futures = <Future>[
-        api.get(quoteEndpoint),
+        QuoteService().getAll(),
         if (_projects.isEmpty) ProjectService().getAll(),
       ];
-
       final results = await Future.wait(futures);
-
       if (!mounted) return;
-
-      final quoteList = (results[0] as List<dynamic>? ?? [])
-          .map((e) => Quote.fromJson(e as Map<String, dynamic>))
-          .toList();
-
-      if (results.length > 1) {
-        _projects = results[1] as List<Project>;
-      }
-
-      repo.upsertQuotes(quoteList);
-
+      final quotes = results[0] as List<Quote>;
+      if (_projects.isEmpty) _projects = results[1] as List<Project>;
       setState(() {
-        _allQuotes = quoteList;
-        _projects = _projects;
+        _allQuotes = quotes;
         _loading = false;
       });
-    } on ApiOfflineException {
-      await _loadFromLocal();
     } catch (e) {
-      await _loadFromLocal();
-    }
-  }
-
-  Future<void> _loadFromLocal() async {
-    try {
-      final repo = context.read<LocalRepository>();
-      final quoteList = await repo.getAllQuotes();
-      if (!mounted) return;
-      setState(() {
-        _allQuotes = quoteList;
-        _projects = _projects;
-        _loading = false;
-        _error = null;
-      });
-    } catch (_) {
       if (mounted) {
         setState(() {
           _error = 'No se pudo cargar las cotizaciones.';
@@ -101,11 +59,18 @@ class _QuotesScreenState extends State<QuotesScreen> {
     }
   }
 
-  Project? _projectById(int? id) => null;
+  Project? _projectById(String? id) =>
+      id == null ? null : _projects.where((p) => p.id == id).firstOrNull;
 
   List<Quote> get _filteredQuotes {
-    if (_statusFilter == 'all') return _allQuotes;
-    return _allQuotes.where((q) => q.status == _statusFilter).toList();
+    var list = _allQuotes;
+    if (_statusFilter != 'all') {
+      list = list.where((q) => q.status == _statusFilter).toList();
+    }
+    if (_projectFilter != null) {
+      list = list.where((q) => q.projectId == _projectFilter).toList();
+    }
+    return list;
   }
 
   Future<void> _deleteQuote(Quote q) async {
@@ -113,7 +78,8 @@ class _QuotesScreenState extends State<QuotesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('¿Eliminar cotización?',
-            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
+            style: GoogleFonts.inter(
+                fontSize: 16, fontWeight: FontWeight.w600)),
         content: Text('Esta acción no se puede deshacer.',
             style: GoogleFonts.inter(fontSize: 13)),
         actions: [
@@ -125,33 +91,21 @@ class _QuotesScreenState extends State<QuotesScreen> {
             onPressed: () => Navigator.of(ctx).pop(true),
             style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.colorError),
-            child: const Text('Eliminar'),
+            child: const Text('Eliminar',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
     if (confirmed == true && mounted) {
       try {
-        final api = context.read<ApiService>();
-        final repo = context.read<LocalRepository>();
-        await api.delete('/api/mobile/quotes/${q.id}');
-        repo.deleteQuote(q.id);
-        _loadData();
-      } on ApiOfflineException {
-        final repo = context.read<LocalRepository>();
-        await repo.addPendingOp(
-          entityType: 'quote', operation: 'delete',
-          entityId: q.id, endpoint: '/api/mobile/quotes/${q.id}',
-        );
-        repo.deleteQuote(q.id);
-        if (mounted) {
-          SyncToast.show(context, 'Eliminado localmente. Se sincronizará al reconectar.');
-          _loadData();
-        }
+        await QuoteService().delete(q.id);
+        await _loadData();
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No se pudo eliminar la cotización.')),
+            const SnackBar(
+                content: Text('No se pudo eliminar la cotización.')),
           );
         }
       }
@@ -257,13 +211,12 @@ class _QuotesScreenState extends State<QuotesScreen> {
             items: [
               const DropdownMenuItem<String?>(
                   value: null, child: Text('Todos los proyectos')),
-              ..._projects.map((p) =>
-                  DropdownMenuItem<String?>(value: p.id, child: Text(p.name))),
+              ..._projects.map((p) => DropdownMenuItem<String?>(
+                    value: p.id,
+                    child: Text(p.name),
+                  )),
             ],
-            onChanged: (v) {
-              setState(() => _projectFilter = v);
-              _loadData();
-            },
+            onChanged: (v) => setState(() => _projectFilter = v),
           ),
       ],
     );
@@ -286,12 +239,12 @@ class _QuotesScreenState extends State<QuotesScreen> {
       padding: const EdgeInsets.all(28),
       itemCount: quotes.length,
       itemBuilder: (context, i) {
-        final project = _projectById(quotes[i].projectId);
+        final q = quotes[i];
         return _QuoteCard(
-          quote: quotes[i],
-          project: project,
-          onEdit: () => _showQuoteDialog(editQuote: quotes[i]),
-          onDelete: () => _deleteQuote(quotes[i]),
+          quote: q,
+          project: _projectById(q.projectId),
+          onEdit: () => _showQuoteDialog(editQuote: q),
+          onDelete: () => _deleteQuote(q),
         );
       },
     );
@@ -313,12 +266,11 @@ class _QuotesScreenState extends State<QuotesScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.wifi_off_outlined,
+          const Icon(Icons.error_outline,
               size: 48, color: AppTheme.colorTextoSecundario),
           const SizedBox(height: 12),
           Text(_error!,
-              style:
-                  GoogleFonts.inter(color: AppTheme.colorTextoSecundario)),
+              style: GoogleFonts.inter(color: AppTheme.colorTextoSecundario)),
           const SizedBox(height: 16),
           OutlinedButton(
               onPressed: _loadData, child: const Text('Reintentar')),
@@ -330,7 +282,7 @@ class _QuotesScreenState extends State<QuotesScreen> {
   void _showQuoteDialog({Quote? editQuote}) {
     showDialog(
       context: context,
-      builder: (ctx) => _NewQuoteDialog(
+      builder: (ctx) => _QuoteDialog(
         projects: _projects,
         editQuote: editQuote,
         onSaved: () {
@@ -412,7 +364,7 @@ class _QuoteCard extends StatelessWidget {
     }
   }
 
-  String _formatMxn(double v) {
+  String _formatAmount(double v) {
     if (v >= 1000000) return '\$${(v / 1000000).toStringAsFixed(1)}M';
     if (v >= 1000) {
       final s = v.toStringAsFixed(0);
@@ -437,6 +389,11 @@ class _QuoteCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final q = quote;
     final statusColor = _statusColor(q.status);
+    final title = q.clientName?.isNotEmpty == true
+        ? q.clientName!
+        : q.folio?.isNotEmpty == true
+            ? q.folio!
+            : 'Sin cliente';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -448,13 +405,13 @@ class _QuoteCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Descripción + proyecto
+          // Título + proyecto + fecha
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  q.description ?? 'Sin descripción',
+                  title,
                   style: GoogleFonts.inter(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
@@ -472,13 +429,24 @@ class _QuoteCard extends StatelessWidget {
                       )
                     else
                       const ProjectBadge(projectName: 'Sin proyecto'),
-                    const SizedBox(width: 8),
-                    Text(
-                      _formatDate(q.createdAt),
-                      style: GoogleFonts.inter(
-                          fontSize: 11,
-                          color: AppTheme.colorTextoSecundario),
-                    ),
+                    if (q.date != null && q.date!.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatDate(q.date),
+                        style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppTheme.colorTextoSecundario),
+                      ),
+                    ],
+                    if (q.folio != null && q.folio!.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        q.folio!,
+                        style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppTheme.colorTextoSecundario),
+                      ),
+                    ],
                   ],
                 ),
               ],
@@ -488,7 +456,8 @@ class _QuoteCard extends StatelessWidget {
 
           // Badge de status
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               color: statusColor.withAlpha(25),
               borderRadius: BorderRadius.circular(20),
@@ -504,9 +473,9 @@ class _QuoteCard extends StatelessWidget {
           ),
           const SizedBox(width: 16),
 
-          // Monto
+          // Total
           Text(
-            _formatMxn(q.amountMxn),
+            _formatAmount(q.total),
             style: GoogleFonts.inter(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -516,7 +485,7 @@ class _QuoteCard extends StatelessWidget {
           const SizedBox(width: 4),
 
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert,
+            icon: const Icon(Icons.more_vert,
                 size: 18, color: AppTheme.colorTextoSecundario),
             onSelected: (v) {
               if (v == 'edit') onEdit();
@@ -535,29 +504,34 @@ class _QuoteCard extends StatelessWidget {
 
 // ── Dialog: Nueva / Editar cotización ─────────────────────────────────────────
 
-class _NewQuoteDialog extends StatefulWidget {
+class _QuoteDialog extends StatefulWidget {
   final List<Project> projects;
   final VoidCallback onSaved;
   final Quote? editQuote;
 
-  const _NewQuoteDialog({
+  const _QuoteDialog({
     required this.projects,
     required this.onSaved,
     this.editQuote,
   });
 
   @override
-  State<_NewQuoteDialog> createState() => _NewQuoteDialogState();
+  State<_QuoteDialog> createState() => _QuoteDialogState();
 }
 
-class _NewQuoteDialogState extends State<_NewQuoteDialog> {
+class _QuoteDialogState extends State<_QuoteDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _descController = TextEditingController();
-  final _amountController = TextEditingController();
-  final _exchangeController = TextEditingController(text: '1');
+  late TextEditingController _folioController;
+  late TextEditingController _clientNameController;
+  late TextEditingController _clientPhoneController;
+  late TextEditingController _subtotalController;
+  late TextEditingController _taxController;
+  late TextEditingController _totalController;
+  late TextEditingController _notesController;
   String? _selectedProjectId;
-  String _currency = 'MXN';
   String _status = 'pendiente';
+  DateTime? _date;
+  DateTime? _validUntil;
   bool _saving = false;
   String? _error;
 
@@ -567,20 +541,65 @@ class _NewQuoteDialogState extends State<_NewQuoteDialog> {
   void initState() {
     super.initState();
     final q = widget.editQuote;
-    if (q != null) {
-      _descController.text = q.description ?? '';
-      _amountController.text = q.amountMxn.toStringAsFixed(2);
-      _selectedProjectId = q.projectId.toString();
-      _status = q.status;
-    }
+    _folioController = TextEditingController(text: q?.folio ?? '');
+    _clientNameController =
+        TextEditingController(text: q?.clientName ?? '');
+    _clientPhoneController =
+        TextEditingController(text: q?.clientPhone ?? '');
+    _subtotalController = TextEditingController(
+        text: q != null ? q.subtotal.toStringAsFixed(2) : '');
+    _taxController = TextEditingController(
+        text: q != null ? q.tax.toStringAsFixed(2) : '');
+    _totalController = TextEditingController(
+        text: q != null ? q.total.toStringAsFixed(2) : '');
+    _notesController = TextEditingController(text: q?.notes ?? '');
+    _selectedProjectId = q?.projectId;
+    _status = q?.status ?? 'pendiente';
+    _date = q?.date != null ? DateTime.tryParse(q!.date!) : null;
+    _validUntil =
+        q?.validUntil != null ? DateTime.tryParse(q!.validUntil!) : null;
   }
 
   @override
   void dispose() {
-    _descController.dispose();
-    _amountController.dispose();
-    _exchangeController.dispose();
+    _folioController.dispose();
+    _clientNameController.dispose();
+    _clientPhoneController.dispose();
+    _subtotalController.dispose();
+    _taxController.dispose();
+    _totalController.dispose();
+    _notesController.dispose();
     super.dispose();
+  }
+
+  void _recalcTotal() {
+    final sub = double.tryParse(_subtotalController.text) ?? 0;
+    final tax = double.tryParse(_taxController.text) ?? 0;
+    _totalController.text = (sub + tax).toStringAsFixed(2);
+  }
+
+  String _formatDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  Future<void> _pickDate(bool isValidUntil) async {
+    final initial = isValidUntil
+        ? (_validUntil ?? DateTime.now())
+        : (_date ?? DateTime.now());
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        if (isValidUntil) {
+          _validUntil = picked;
+        } else {
+          _date = picked;
+        }
+      });
+    }
   }
 
   Future<void> _save() async {
@@ -589,83 +608,27 @@ class _NewQuoteDialogState extends State<_NewQuoteDialog> {
       _saving = true;
       _error = null;
     });
-    final amount = double.parse(_amountController.text);
-    final exchangeRate = double.tryParse(_exchangeController.text) ?? 1.0;
-    final amountMxn = _currency == 'MXN' ? amount : amount * exchangeRate;
-
-    final editBody = <String, dynamic>{
-      'description': _descController.text.trim().isEmpty
-          ? null
-          : _descController.text.trim(),
-      'amount': amount,
-      'currency': _currency,
-      'exchange_rate': exchangeRate,
+    final body = <String, dynamic>{
+      'folio': _folioController.text.trim(),
+      'clientName': _clientNameController.text.trim(),
+      'clientPhone': _clientPhoneController.text.trim(),
+      'projectId': _selectedProjectId ?? '',
+      'date': _date?.toIso8601String().substring(0, 10) ?? '',
+      'validUntil': _validUntil?.toIso8601String().substring(0, 10) ?? '',
       'status': _status,
+      'subtotal': double.tryParse(_subtotalController.text) ?? 0.0,
+      'tax': double.tryParse(_taxController.text) ?? 0.0,
+      'total': double.tryParse(_totalController.text) ?? 0.0,
+      'notes': _notesController.text.trim(),
     };
-    final createBody = <String, dynamic>{
-      ...editBody,
-      'project_id': _selectedProjectId,
-    };
-
-    print('[QUOTES] Creando cotización - isOnline: ${!_isEditing ? "check" : "edit"}');
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
+      final svc = QuoteService();
       if (_isEditing) {
-        print('[QUOTES] Editando cotización ID: ${widget.editQuote!.id}');
-        await api.put('/api/mobile/quotes/${widget.editQuote!.id}', editBody);
-        repo.upsertQuote(Quote.fromJson({
-          ...editBody, 'id': widget.editQuote!.id,
-          'project_id': widget.editQuote!.projectId,
-          'amount_mxn': amountMxn,
-          'created_at': widget.editQuote!.createdAt,
-        }));
+        await svc.update(widget.editQuote!.id, body);
       } else {
-        print('[QUOTES] Creando cotización - isOnline: true');
-        final result = await api.post('/api/mobile/quotes', createBody);
-        if (result != null) {
-          repo.upsertQuote(Quote.fromJson(result as Map<String, dynamic>));
-        }
+        await svc.create(body);
       }
       if (mounted) widget.onSaved();
-    } on ApiOfflineException {
-      final repo = context.read<LocalRepository>();
-      if (_isEditing) {
-        final endpoint = '/api/mobile/quotes/${widget.editQuote!.id}';
-        print('[QUOTES] Creando cotización - isOnline: false');
-        print('[QUOTES] Agregando a PendingOps: $endpoint');
-        await repo.addPendingOp(
-          entityType: 'quote', operation: 'update',
-          entityId: widget.editQuote!.id,
-          endpoint: endpoint,
-          payload: jsonEncode(editBody),
-        );
-        repo.upsertQuote(Quote.fromJson({
-          ...editBody, 'id': widget.editQuote!.id,
-          'project_id': widget.editQuote!.projectId,
-          'amount_mxn': amountMxn,
-          'created_at': widget.editQuote!.createdAt,
-        }));
-      } else {
-        const endpoint = '/api/mobile/quotes';
-        print('[QUOTES] Creando cotización - isOnline: false');
-        print('[QUOTES] Agregando a PendingOps: $endpoint');
-        final tempId = -DateTime.now().millisecondsSinceEpoch;
-        await repo.addPendingOp(
-          entityType: 'quote', operation: 'create',
-          tempId: tempId, endpoint: endpoint,
-          payload: jsonEncode(createBody),
-        );
-        repo.upsertQuote(Quote.fromJson({
-          ...createBody, 'id': tempId,
-          'amount_mxn': amountMxn,
-          'created_at': DateTime.now().toIso8601String(),
-        }));
-      }
-      if (mounted) {
-        SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-        widget.onSaved();
-      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -686,88 +649,174 @@ class _NewQuoteDialogState extends State<_NewQuoteDialog> {
         style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
       ),
       content: SizedBox(
-        width: 400,
+        width: 460,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Proyecto (solo en creación)
-                if (!_isEditing)
-                  DropdownButtonFormField<String?>(
-                    value: _selectedProjectId,
-                    items: [
-                      const DropdownMenuItem<String?>(
-                          value: null, child: Text('— Selecciona un proyecto —')),
-                      ...widget.projects.map((p) =>
-                          DropdownMenuItem<String?>(value: p.id, child: Text(p.name))),
-                    ],
-                    onChanged: (v) => setState(() => _selectedProjectId = v),
-                    decoration: const InputDecoration(labelText: 'Proyecto *'),
-                    validator: (v) => v == null ? 'Selecciona un proyecto' : null,
-                  ),
-                if (!_isEditing) const SizedBox(height: 10),
-                TextFormField(
-                  controller: _descController,
-                  decoration: const InputDecoration(
-                      labelText: 'Descripción (opcional)'),
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 10),
+                // Folio + cliente
                 Row(
                   children: [
                     Expanded(
+                      flex: 2,
+                      child: TextFormField(
+                        controller: _folioController,
+                        decoration:
+                            const InputDecoration(labelText: 'Folio (opcional)'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
                       flex: 3,
                       child: TextFormField(
-                        controller: _amountController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Monto *'),
+                        controller: _clientNameController,
+                        decoration:
+                            const InputDecoration(labelText: 'Cliente (opcional)'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // Teléfono cliente
+                TextFormField(
+                  controller: _clientPhoneController,
+                  decoration:
+                      const InputDecoration(labelText: 'Teléfono (opcional)'),
+                  keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 10),
+
+                // Proyecto
+                DropdownButtonFormField<String?>(
+                  value: _selectedProjectId,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('Sin proyecto')),
+                    ...widget.projects.map((p) => DropdownMenuItem<String?>(
+                          value: p.id,
+                          child: Text(p.name),
+                        )),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _selectedProjectId = v),
+                  decoration: const InputDecoration(
+                      labelText: 'Proyecto (opcional)'),
+                ),
+                const SizedBox(height: 10),
+
+                // Fechas
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => _pickDate(false),
+                        child: InputDecorator(
+                          decoration:
+                              const InputDecoration(labelText: 'Fecha'),
+                          child: Text(
+                            _date != null ? _formatDate(_date!) : 'Sin fecha',
+                            style: GoogleFonts.inter(fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => _pickDate(true),
+                        child: InputDecorator(
+                          decoration:
+                              const InputDecoration(labelText: 'Válida hasta'),
+                          child: Text(
+                            _validUntil != null
+                                ? _formatDate(_validUntil!)
+                                : 'Sin fecha',
+                            style: GoogleFonts.inter(fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // Subtotal + IVA + Total
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _subtotalController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: const InputDecoration(
+                            labelText: 'Subtotal', prefixText: '\$ '),
+                        onChanged: (_) => _recalcTotal(),
                         validator: (v) {
                           if (v == null || v.isEmpty) return 'Requerido';
-                          if (double.tryParse(v) == null) return 'Número inválido';
+                          if (double.tryParse(v) == null) return 'Inválido';
                           return null;
                         },
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      flex: 2,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _currency,
-                        items: const [
-                          DropdownMenuItem(value: 'MXN', child: Text('MXN')),
-                          DropdownMenuItem(value: 'USD', child: Text('USD')),
-                        ],
-                        onChanged: (v) =>
-                            setState(() => _currency = v ?? 'MXN'),
-                        decoration: const InputDecoration(labelText: 'Moneda'),
+                      child: TextFormField(
+                        controller: _taxController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: const InputDecoration(
+                            labelText: 'IVA', prefixText: '\$ '),
+                        onChanged: (_) => _recalcTotal(),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _totalController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: const InputDecoration(
+                            labelText: 'Total', prefixText: '\$ '),
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Requerido';
+                          if (double.tryParse(v) == null) return 'Inválido';
+                          return null;
+                        },
                       ),
                     ),
                   ],
                 ),
-                if (_currency == 'USD') ...[
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _exchangeController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                        labelText: 'Tipo de cambio (MXN/USD)'),
-                  ),
-                ],
                 const SizedBox(height: 10),
+
+                // Estado
                 DropdownButtonFormField<String>(
-                  initialValue: _status,
+                  value: _status,
                   items: const [
-                    DropdownMenuItem(value: 'pendiente', child: Text('Pendiente')),
-                    DropdownMenuItem(value: 'aprobada', child: Text('Aprobada')),
-                    DropdownMenuItem(value: 'rechazada', child: Text('Rechazada')),
+                    DropdownMenuItem(
+                        value: 'pendiente', child: Text('Pendiente')),
+                    DropdownMenuItem(
+                        value: 'aprobada', child: Text('Aprobada')),
+                    DropdownMenuItem(
+                        value: 'rechazada', child: Text('Rechazada')),
                   ],
                   onChanged: (v) {
                     if (v != null) setState(() => _status = v);
                   },
                   decoration: const InputDecoration(labelText: 'Estado'),
                 ),
+                const SizedBox(height: 10),
+
+                // Notas
+                TextFormField(
+                  controller: _notesController,
+                  maxLines: 2,
+                  decoration:
+                      const InputDecoration(labelText: 'Notas (opcional)'),
+                ),
+
                 if (_error != null) ...[
                   const SizedBox(height: 10),
                   Text(_error!,
@@ -791,7 +840,8 @@ class _NewQuoteDialogState extends State<_NewQuoteDialog> {
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
+                      strokeWidth: 2, color: Colors.white),
+                )
               : Text(_isEditing ? 'Guardar cambios' : 'Crear cotización'),
         ),
       ],

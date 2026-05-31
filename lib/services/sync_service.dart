@@ -1,10 +1,7 @@
 import 'dart:convert';
 import '../database/local_repository.dart';
-import '../models/transaction.dart';
-import '../models/quote.dart';
 import '../models/inventory_item.dart';
 import '../models/inventory_movement.dart';
-import '../models/budget.dart';
 import 'api_service.dart';
 
 class SyncService {
@@ -138,21 +135,8 @@ class SyncService {
   // ─────────────────────────────────────────────────────────────────────
 
   Future<void> _pullAll(List<String> errors) async {
-    final now = DateTime.now();
-
-    // Si hay ops pendientes sin enviar, omitir los clear() para no borrar
-    // registros locales con tempId negativo que aún no llegaron al servidor.
-    final pendingCount = await _repo.getPendingOpsCount();
-    final skipClear = pendingCount > 0;
-    if (skipClear) {
-      print('[SYNC] Hay $pendingCount ops pendientes — omitiendo clear para proteger datos locales');
-    }
-
     final futures = [
-      _safePull('transactions', errors, () => _pullTransactions(skipClear: skipClear)),
-      _safePull('quotes', errors, _pullQuotes),
-_safePull('inventory', errors, _pullInventory),
-      _safePull('budgets', errors, () => _pullBudgets(now.month, now.year, skipClear: skipClear)),
+      _safePull('inventory', errors, _pullInventory),
       _safePull('chart', errors, _pullChartData),
     ];
 
@@ -170,39 +154,12 @@ _safePull('inventory', errors, _pullInventory),
     }
   }
 
-  Future<void> _pullTransactions({bool skipClear = false}) async {
-    final data = await _api.get('/api/mobile/transactions');
-    final list = (data as List)
-        .map((e) => Transaction.fromJson(e as Map<String, dynamic>))
-        .toList();
-    if (!skipClear) await _repo.clearTransactions();
-    await _repo.upsertTransactions(list);
-  }
-
-  Future<void> _pullQuotes() async {
-    final data = await _api.get('/api/mobile/quotes');
-    final list = (data as List)
-        .map((e) => Quote.fromJson(e as Map<String, dynamic>))
-        .toList();
-    await _repo.upsertQuotes(list);
-  }
-
   Future<void> _pullInventory() async {
     final data = await _api.get('/api/mobile/inventory');
     final list = (data as List)
         .map((e) => InventoryItem.fromJson(e as Map<String, dynamic>))
         .toList();
     await _repo.upsertInventoryItems(list);
-  }
-
-  Future<void> _pullBudgets(int month, int year, {bool skipClear = false}) async {
-    final data =
-        await _api.get('/api/mobile/budgets/status?month=$month&year=$year');
-    final list = (data as List)
-        .map((e) => Budget.fromJson(e as Map<String, dynamic>))
-        .toList();
-    if (!skipClear) await _repo.clearBudgets();
-    await _repo.upsertBudgets(list);
   }
 
   Future<void> _pullChartData() async {

@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
+import '../../services/budget_service.dart';
 import '../../services/category_service.dart';
-import '../../database/local_repository.dart';
-import '../../widgets/sync_toast.dart';
-import '../../models/budget.dart';
+import '../../services/project_service.dart';
+import '../../models/budget_model.dart';
 import '../../models/category_model.dart';
+import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
@@ -22,23 +20,13 @@ class BudgetsScreen extends StatefulWidget {
 class _BudgetsScreenState extends State<BudgetsScreen> {
   List<Budget> _budgets = [];
   List<Category> _categories = [];
+  List<Project> _projects = [];
   bool _loading = true;
   String? _error;
-
-  late int _month;
-  late int _year;
-
-  static const _months = [
-    '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-  ];
 
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    _month = now.month;
-    _year = now.year;
     _loadData();
   }
 
@@ -48,50 +36,22 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       _error = null;
     });
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
-
-      // Categorías desde PocketBase (solo si no están cargadas)
-      if (_categories.isEmpty) {
-        try {
-          _categories = await CategoryService().getAll();
-        } catch (_) {
-          // Continuar aunque fallen las categorías
-        }
-      }
-
-      final budgetData = await api.get('/api/mobile/budgets/status?month=$_month&year=$_year');
+      final futures = <Future>[
+        BudgetService().getAll(),
+        if (_categories.isEmpty) CategoryService().getAll(),
+        if (_projects.isEmpty) ProjectService().getAll(),
+      ];
+      final results = await Future.wait(futures);
       if (!mounted) return;
-
-      final budgetList = (budgetData as List<dynamic>? ?? [])
-          .map((e) => Budget.fromJson(e as Map<String, dynamic>))
-          .toList();
-
-      await repo.clearBudgets();
-      repo.upsertBudgets(budgetList);
-
+      int idx = 0;
+      final budgets = results[idx++] as List<Budget>;
+      if (_categories.isEmpty) _categories = results[idx++] as List<Category>;
+      if (_projects.isEmpty) _projects = results[idx++] as List<Project>;
       setState(() {
-        _budgets = budgetList;
+        _budgets = budgets;
         _loading = false;
       });
-    } on ApiOfflineException {
-      await _loadFromLocal();
     } catch (e) {
-      await _loadFromLocal();
-    }
-  }
-
-  Future<void> _loadFromLocal() async {
-    try {
-      final repo = context.read<LocalRepository>();
-      final budgetList = await repo.getBudgets();
-      if (!mounted) return;
-      setState(() {
-        _budgets = budgetList;
-        _loading = false;
-        _error = null;
-      });
-    } catch (_) {
       if (mounted) {
         setState(() {
           _error = 'No se pudo cargar los presupuestos.';
@@ -101,35 +61,12 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     }
   }
 
-  void _prevMonth() {
-    setState(() {
-      if (_month == 1) {
-        _month = 12;
-        _year--;
-      } else {
-        _month--;
-      }
-    });
-    _loadData();
-  }
-
-  void _nextMonth() {
-    setState(() {
-      if (_month == 12) {
-        _month = 1;
-        _year++;
-      } else {
-        _month++;
-      }
-    });
-    _loadData();
-  }
-
-  double get _totalLimit =>
-      _budgets.fold(0.0, (sum, b) => sum + b.limit);
-  double get _totalSpent =>
-      _budgets.fold(0.0, (sum, b) => sum + b.spent);
-  double get _totalRemaining => _totalLimit - _totalSpent;
+  double get _totalPlanned =>
+      _budgets.fold(0.0, (s, b) => s + b.plannedAmount);
+  double get _totalActual =>
+      _budgets.fold(0.0, (s, b) => s + b.actualAmount);
+  double get _totalRemaining =>
+      _budgets.fold(0.0, (s, b) => s + b.remaining);
 
   String _fmt(double v) {
     if (v >= 1000000) return '\$${(v / 1000000).toStringAsFixed(1)}M';
@@ -165,34 +102,6 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                     color: AppTheme.colorTexto,
                   ),
                 ),
-                const SizedBox(width: 24),
-                // Selector de mes/año
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  onPressed: _prevMonth,
-                  color: AppTheme.colorTextoSecundario,
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppTheme.colorCard,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppTheme.colorBorde),
-                  ),
-                  child: Text(
-                    '${_months[_month]} $_year',
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.colorTexto,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.chevron_right),
-                  onPressed: _nextMonth,
-                  color: AppTheme.colorTextoSecundario,
-                ),
                 const Spacer(),
                 ElevatedButton.icon(
                   onPressed: () => _showBudgetDialog(),
@@ -220,18 +129,16 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     return ListView(
       padding: const EdgeInsets.all(28),
       children: [
-        // Resumen general
         if (_budgets.isNotEmpty) ...[
           _buildSummaryRow(),
           const SizedBox(height: 24),
         ],
 
-        // Grid de cards
         if (_budgets.isEmpty)
           EmptyState(
             icon: Icons.savings_outlined,
             title: 'Sin presupuestos',
-            subtitle: 'Crea un presupuesto para ${_months[_month]}',
+            subtitle: 'Crea el primer presupuesto',
             actionLabel: 'Nuevo presupuesto',
             onAction: _showBudgetDialog,
           )
@@ -246,8 +153,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       children: [
         Expanded(
           child: _SummaryCard(
-            label: 'Total presupuestado',
-            value: _fmt(_totalLimit),
+            label: 'Total planeado',
+            value: _fmt(_totalPlanned),
             color: AppTheme.colorPrimario,
           ),
         ),
@@ -255,7 +162,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
         Expanded(
           child: _SummaryCard(
             label: 'Total gastado',
-            value: _fmt(_totalSpent),
+            value: _fmt(_totalActual),
             color: AppTheme.colorError,
           ),
         ),
@@ -328,7 +235,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
             childAspectRatio: 1.8,
           ),
           itemCount: 6,
-          itemBuilder: (context, i) => const ShimmerBox(height: double.infinity),
+          itemBuilder: (context, i) =>
+              const ShimmerBox(height: double.infinity),
         ),
       ],
     );
@@ -339,27 +247,25 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.wifi_off_outlined,
+          const Icon(Icons.error_outline,
               size: 48, color: AppTheme.colorTextoSecundario),
           const SizedBox(height: 12),
           Text(_error!,
               style: GoogleFonts.inter(color: AppTheme.colorTextoSecundario)),
           const SizedBox(height: 16),
-          OutlinedButton(onPressed: _loadData, child: const Text('Reintentar')),
+          OutlinedButton(
+              onPressed: _loadData, child: const Text('Reintentar')),
         ],
       ),
     );
   }
 
-  // ── Diálogos ──────────────────────────────────────────────────────────────
-
   void _showBudgetDialog({Budget? editBudget}) {
     showDialog(
       context: context,
-      builder: (ctx) => _NewBudgetDialog(
+      builder: (ctx) => _BudgetDialog(
         categories: _categories,
-        month: _month,
-        year: _year,
+        projects: _projects,
         editBudget: editBudget,
         onSaved: () {
           Navigator.of(ctx).pop();
@@ -374,9 +280,10 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('¿Eliminar presupuesto?',
-            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
+            style: GoogleFonts.inter(
+                fontSize: 16, fontWeight: FontWeight.w600)),
         content: Text(
-            'Presupuesto de ${b.categoryName} para ${_months[_month]} $_year.\nEsta acción no se puede deshacer.',
+            'Presupuesto "${b.name}".\nEsta acción no se puede deshacer.',
             style: GoogleFonts.inter(fontSize: 13)),
         actions: [
           TextButton(
@@ -385,31 +292,18 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style:
-                ElevatedButton.styleFrom(backgroundColor: AppTheme.colorError),
-            child: const Text('Eliminar'),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.colorError),
+            child: const Text('Eliminar',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
     if (confirmed == true && mounted) {
       try {
-        await context
-            .read<ApiService>()
-            .delete('/api/mobile/budgets/${b.budgetId}');
-        context.read<LocalRepository>().deleteBudget(b.budgetId);
-        _loadData();
-      } on ApiOfflineException {
-        final repo = context.read<LocalRepository>();
-        await repo.addPendingOp(
-          entityType: 'budget', operation: 'delete',
-          entityId: b.budgetId, endpoint: '/api/mobile/budgets/${b.budgetId}',
-        );
-        repo.deleteBudget(b.budgetId);
-        if (mounted) {
-          SyncToast.show(context, 'Eliminado localmente. Se sincronizará al reconectar.');
-          _loadData();
-        }
+        await BudgetService().delete(b.id);
+        await _loadData();
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -470,15 +364,10 @@ class _BudgetCard extends StatelessWidget {
     required this.onDelete,
   });
 
-  Color _alertColor(String level) {
-    switch (level) {
-      case 'danger':
-        return AppTheme.colorError;
-      case 'warning':
-        return AppTheme.colorAdvertencia;
-      default:
-        return AppTheme.colorExito;
-    }
+  Color _barColor(double pct) {
+    if (pct >= 100) return AppTheme.colorError;
+    if (pct >= 80) return AppTheme.colorAdvertencia;
+    return AppTheme.colorExito;
   }
 
   String _fmt(double v) {
@@ -497,8 +386,9 @@ class _BudgetCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final b = budget;
-    final barColor = _alertColor(b.alertLevel);
-    final pctClamped = (b.pct / 100).clamp(0.0, 1.0);
+    final pct = b.pct;
+    final barColor = _barColor(pct);
+    final pctClamped = (pct / 100).clamp(0.0, 1.0);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
@@ -506,8 +396,9 @@ class _BudgetCard extends StatelessWidget {
         color: AppTheme.colorCard,
         borderRadius: BorderRadius.circular(AppTheme.radiusCard),
         boxShadow: AppTheme.sombraCard,
-        border: b.alertLevel == 'danger'
-            ? Border.all(color: AppTheme.colorError.withAlpha(80), width: 1.5)
+        border: pct >= 100
+            ? Border.all(
+                color: AppTheme.colorError.withAlpha(80), width: 1.5)
             : null,
       ),
       child: Column(
@@ -517,7 +408,7 @@ class _BudgetCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  b.categoryName,
+                  b.name,
                   style: GoogleFonts.inter(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -527,7 +418,7 @@ class _BudgetCard extends StatelessWidget {
                 ),
               ),
               PopupMenuButton<String>(
-                icon: Icon(Icons.more_vert,
+                icon: const Icon(Icons.more_vert,
                     size: 18, color: AppTheme.colorTextoSecundario),
                 onSelected: (v) {
                   if (v == 'edit') onEdit();
@@ -541,6 +432,13 @@ class _BudgetCard extends StatelessWidget {
             ],
           ),
 
+          if (b.period != null && b.period!.isNotEmpty)
+            Text(
+              b.period!,
+              style: GoogleFonts.inter(
+                  fontSize: 11, color: AppTheme.colorTextoSecundario),
+            ),
+
           const Spacer(),
 
           // Montos
@@ -552,8 +450,9 @@ class _BudgetCard extends StatelessWidget {
                   children: [
                     Text('Gastado',
                         style: GoogleFonts.inter(
-                            fontSize: 10, color: AppTheme.colorTextoSecundario)),
-                    Text(_fmt(b.spent),
+                            fontSize: 10,
+                            color: AppTheme.colorTextoSecundario)),
+                    Text(_fmt(b.actualAmount),
                         style: GoogleFonts.inter(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
@@ -564,10 +463,11 @@ class _BudgetCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('Límite',
+                  Text('Planeado',
                       style: GoogleFonts.inter(
-                          fontSize: 10, color: AppTheme.colorTextoSecundario)),
-                  Text(_fmt(b.limit),
+                          fontSize: 10,
+                          color: AppTheme.colorTextoSecundario)),
+                  Text(_fmt(b.plannedAmount),
                       style: GoogleFonts.inter(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -594,11 +494,13 @@ class _BudgetCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '${b.pct.toStringAsFixed(1)}% usado',
+                '${pct.toStringAsFixed(1)}% usado',
                 style: GoogleFonts.inter(
-                    fontSize: 11, color: barColor, fontWeight: FontWeight.w500),
+                    fontSize: 11,
+                    color: barColor,
+                    fontWeight: FontWeight.w500),
               ),
-              if (b.alertLevel != 'ok')
+              if (pct >= 80)
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -607,7 +509,7 @@ class _BudgetCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    b.alertLevel == 'danger' ? 'Excedido' : 'Alerta',
+                    pct >= 100 ? 'Excedido' : 'Alerta',
                     style: GoogleFonts.inter(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
@@ -624,56 +526,87 @@ class _BudgetCard extends StatelessWidget {
 
 // ── Dialog: Nuevo / Editar presupuesto ────────────────────────────────────────
 
-class _NewBudgetDialog extends StatefulWidget {
+class _BudgetDialog extends StatefulWidget {
   final List<Category> categories;
-  final int month;
-  final int year;
+  final List<Project> projects;
   final VoidCallback onSaved;
   final Budget? editBudget;
 
-  const _NewBudgetDialog({
+  const _BudgetDialog({
     required this.categories,
-    required this.month,
-    required this.year,
+    required this.projects,
     required this.onSaved,
     this.editBudget,
   });
 
   @override
-  State<_NewBudgetDialog> createState() => _NewBudgetDialogState();
+  State<_BudgetDialog> createState() => _BudgetDialogState();
 }
 
-class _NewBudgetDialogState extends State<_NewBudgetDialog> {
+class _BudgetDialogState extends State<_BudgetDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _limitController = TextEditingController();
+  late TextEditingController _nameController;
+  late TextEditingController _plannedController;
+  late TextEditingController _actualController;
+  late TextEditingController _periodController;
+  late TextEditingController _notesController;
   String? _selectedCategoryId;
-  late int _month;
-  late int _year;
+  String? _selectedProjectId;
+  DateTime? _startDate;
+  DateTime? _endDate;
   bool _saving = false;
   String? _error;
 
   bool get _isEditing => widget.editBudget != null;
 
-  static const _months = [
-    '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-  ];
-
   @override
   void initState() {
     super.initState();
-    _month = widget.month;
-    _year = widget.year;
     final b = widget.editBudget;
-    if (b != null) {
-      _limitController.text = b.limit.toStringAsFixed(0);
-    }
+    _nameController = TextEditingController(text: b?.name ?? '');
+    _plannedController = TextEditingController(
+        text: b != null ? b.plannedAmount.toStringAsFixed(2) : '');
+    _actualController = TextEditingController(
+        text: b != null ? b.actualAmount.toStringAsFixed(2) : '0');
+    _periodController = TextEditingController(text: b?.period ?? '');
+    _notesController = TextEditingController(text: b?.notes ?? '');
+    _selectedCategoryId = b?.categoryId;
+    _selectedProjectId = b?.projectId;
+    _startDate = b?.startDate != null ? DateTime.tryParse(b!.startDate!) : null;
+    _endDate = b?.endDate != null ? DateTime.tryParse(b!.endDate!) : null;
   }
 
   @override
   void dispose() {
-    _limitController.dispose();
+    _nameController.dispose();
+    _plannedController.dispose();
+    _actualController.dispose();
+    _periodController.dispose();
+    _notesController.dispose();
     super.dispose();
+  }
+
+  String _formatDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  Future<void> _pickDate(bool isEnd) async {
+    final initial =
+        isEnd ? (_endDate ?? DateTime.now()) : (_startDate ?? DateTime.now());
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        if (isEnd) {
+          _endDate = picked;
+        } else {
+          _startDate = picked;
+        }
+      });
+    }
   }
 
   Future<void> _save() async {
@@ -682,48 +615,26 @@ class _NewBudgetDialogState extends State<_NewBudgetDialog> {
       _saving = true;
       _error = null;
     });
-    final limitAmount = double.parse(_limitController.text);
-
+    final body = <String, dynamic>{
+      'name': _nameController.text.trim(),
+      'plannedAmount':
+          double.tryParse(_plannedController.text) ?? 0.0,
+      'actualAmount': double.tryParse(_actualController.text) ?? 0.0,
+      'categoryId': _selectedCategoryId ?? '',
+      'projectId': _selectedProjectId ?? '',
+      'period': _periodController.text.trim(),
+      'startDate': _startDate?.toIso8601String().substring(0, 10) ?? '',
+      'endDate': _endDate?.toIso8601String().substring(0, 10) ?? '',
+      'notes': _notesController.text.trim(),
+    };
     try {
-      final api = context.read<ApiService>();
+      final svc = BudgetService();
       if (_isEditing) {
-        await api.put('/api/mobile/budgets/${widget.editBudget!.budgetId}', {
-          'limit_amount': limitAmount,
-        });
+        await svc.update(widget.editBudget!.id, body);
       } else {
-        await api.post('/api/mobile/budgets', {
-          'category_id': _selectedCategoryId,
-          'limit_amount': limitAmount,
-          'month': _month,
-          'year': _year,
-        });
+        await svc.create(body);
       }
       if (mounted) widget.onSaved();
-    } on ApiOfflineException {
-      final repo = context.read<LocalRepository>();
-      if (_isEditing) {
-        await repo.addPendingOp(
-          entityType: 'budget', operation: 'update',
-          entityId: widget.editBudget!.budgetId,
-          endpoint: '/api/mobile/budgets/${widget.editBudget!.budgetId}',
-          payload: jsonEncode({'limit_amount': limitAmount}),
-        );
-      } else {
-        await repo.addPendingOp(
-          entityType: 'budget', operation: 'create',
-          endpoint: '/api/mobile/budgets',
-          payload: jsonEncode({
-            'category_id': _selectedCategoryId,
-            'limit_amount': limitAmount,
-            'month': _month,
-            'year': _year,
-          }),
-        );
-      }
-      if (mounted) {
-        SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-        widget.onSaved();
-      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -744,84 +655,153 @@ class _NewBudgetDialogState extends State<_NewBudgetDialog> {
         style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
       ),
       content: SizedBox(
-        width: 380,
+        width: 440,
         child: Form(
           key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Categoría (solo en creación)
-              if (!_isEditing)
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Nombre
+                TextFormField(
+                  controller: _nameController,
+                  decoration:
+                      const InputDecoration(labelText: 'Nombre del presupuesto *'),
+                  validator: (v) =>
+                      v == null || v.trim().isEmpty ? 'Requerido' : null,
+                ),
+                const SizedBox(height: 10),
+
+                // Categoría
                 DropdownButtonFormField<String?>(
-                  initialValue: _selectedCategoryId,
+                  value: _selectedCategoryId,
                   items: [
                     const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('— Selecciona una categoría —')),
+                        value: null, child: Text('Sin categoría')),
                     ...widget.categories.map((c) => DropdownMenuItem<String?>(
                           value: c.id,
                           child: Text(c.name),
                         )),
                   ],
-                  onChanged: (v) => setState(() => _selectedCategoryId = v),
-                  decoration: const InputDecoration(labelText: 'Categoría *'),
-                  validator: (v) =>
-                      v == null ? 'Selecciona una categoría' : null,
+                  onChanged: (v) =>
+                      setState(() => _selectedCategoryId = v),
+                  decoration:
+                      const InputDecoration(labelText: 'Categoría (opcional)'),
                 ),
-              if (!_isEditing) const SizedBox(height: 10),
+                const SizedBox(height: 10),
 
-              // Mes/año (solo en creación)
-              if (!_isEditing)
+                // Proyecto
+                DropdownButtonFormField<String?>(
+                  value: _selectedProjectId,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('Sin proyecto')),
+                    ...widget.projects.map((p) => DropdownMenuItem<String?>(
+                          value: p.id,
+                          child: Text(p.name),
+                        )),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _selectedProjectId = v),
+                  decoration:
+                      const InputDecoration(labelText: 'Proyecto (opcional)'),
+                ),
+                const SizedBox(height: 10),
+
+                // Periodo + fechas
+                TextFormField(
+                  controller: _periodController,
+                  decoration: const InputDecoration(
+                      labelText: 'Periodo (opcional, ej: 2026-05)'),
+                ),
+                const SizedBox(height: 10),
+
                 Row(
                   children: [
                     Expanded(
-                      child: DropdownButtonFormField<int>(
-                        initialValue: _month,
-                        items: List.generate(
-                            12,
-                            (i) => DropdownMenuItem(
-                                value: i + 1, child: Text(_months[i + 1]))),
-                        onChanged: (v) {
-                          if (v != null) setState(() => _month = v);
+                      child: InkWell(
+                        onTap: () => _pickDate(false),
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                              labelText: 'Fecha inicio'),
+                          child: Text(
+                            _startDate != null
+                                ? _formatDate(_startDate!)
+                                : 'Sin fecha',
+                            style: GoogleFonts.inter(fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => _pickDate(true),
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                              labelText: 'Fecha fin'),
+                          child: Text(
+                            _endDate != null
+                                ? _formatDate(_endDate!)
+                                : 'Sin fecha',
+                            style: GoogleFonts.inter(fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // Monto planeado + real
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _plannedController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: const InputDecoration(
+                            labelText: 'Monto planeado *',
+                            prefixText: '\$ '),
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Requerido';
+                          if (double.tryParse(v) == null) return 'Inválido';
+                          return null;
                         },
-                        decoration: const InputDecoration(labelText: 'Mes'),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
-                        initialValue: _year.toString(),
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Año'),
-                        onChanged: (v) {
-                          final y = int.tryParse(v);
-                          if (y != null) _year = y;
-                        },
+                        controller: _actualController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: const InputDecoration(
+                            labelText: 'Monto gastado',
+                            prefixText: '\$ '),
                       ),
                     ),
                   ],
                 ),
-              if (!_isEditing) const SizedBox(height: 10),
-
-              TextFormField(
-                controller: _limitController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Límite (MXN) *'),
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Requerido';
-                  if (double.tryParse(v) == null) return 'Número inválido';
-                  if (double.parse(v) <= 0) return 'Debe ser mayor a 0';
-                  return null;
-                },
-              ),
-
-              if (_error != null) ...[
                 const SizedBox(height: 10),
-                Text(_error!,
-                    style: GoogleFonts.inter(
-                        color: AppTheme.colorError, fontSize: 13)),
+
+                // Notas
+                TextFormField(
+                  controller: _notesController,
+                  maxLines: 2,
+                  decoration:
+                      const InputDecoration(labelText: 'Notas (opcional)'),
+                ),
+
+                if (_error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(_error!,
+                      style: GoogleFonts.inter(
+                          color: AppTheme.colorError, fontSize: 13)),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -837,7 +817,8 @@ class _NewBudgetDialogState extends State<_NewBudgetDialog> {
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
+                      strokeWidth: 2, color: Colors.white),
+                )
               : Text(_isEditing ? 'Guardar cambios' : 'Crear presupuesto'),
         ),
       ],

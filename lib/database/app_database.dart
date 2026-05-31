@@ -6,46 +6,6 @@ import 'package:path/path.dart' as p;
 
 part 'app_database.g.dart';
 
-// ── Transacciones ──────────────────────────────────────────────────────────
-@DataClassName('TransactionRow')
-class Transactions extends Table {
-  IntColumn get id => integer()();
-  TextColumn get type => text()();
-  TextColumn get scopeType => text()();
-  IntColumn get scopeId => integer().nullable()();
-  IntColumn get categoryId => integer().nullable()();
-  TextColumn get categoryName => text().nullable()();
-  TextColumn get projectName => text().nullable()();
-  TextColumn get projectColor => text().nullable()();
-  TextColumn get description => text()();
-  RealColumn get amount => real()();
-  TextColumn get currency => text()();
-  RealColumn get exchangeRate => real()();
-  RealColumn get amountMxn => real()();
-  TextColumn get transactionDate => text()();
-  TextColumn get etapa => text().nullable()();
-  TextColumn get notes => text().nullable()();
-  TextColumn get createdAt => text()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
-// ── Cotizaciones ───────────────────────────────────────────────────────────
-@DataClassName('QuoteRow')
-class Quotes extends Table {
-  IntColumn get id => integer()();
-  IntColumn get projectId => integer()();
-  TextColumn get description => text().nullable()();
-  RealColumn get amountMxn => real()();
-  TextColumn get currency => text().withDefault(const Constant('MXN'))();
-  TextColumn get status => text().withDefault(const Constant('pendiente'))();
-  TextColumn get createdAt => text()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
 // ── Inventario ─────────────────────────────────────────────────────────────
 @DataClassName('InventoryItemRow')
 class InventoryItems extends Table {
@@ -84,25 +44,6 @@ class InventoryMovements extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-// ── Presupuestos ───────────────────────────────────────────────────────────
-// NOTA: 'limit' es palabra reservada en SQL — se usa 'budgetLimit'
-@DataClassName('BudgetRow')
-class Budgets extends Table {
-  IntColumn get budgetId => integer()();
-  IntColumn get categoryId => integer()();
-  TextColumn get categoryName => text()();
-  TextColumn get scopeType => text()();
-  RealColumn get budgetLimit => real()();
-  RealColumn get spent => real().withDefault(const Constant(0.0))();
-  RealColumn get remaining => real().withDefault(const Constant(0.0))();
-  RealColumn get pct => real().withDefault(const Constant(0.0))();
-  TextColumn get alertLevel => text().withDefault(const Constant('ok'))();
-  IntColumn get alertThresholdPct => integer().withDefault(const Constant(80))();
-
-  @override
-  Set<Column> get primaryKey => {budgetId};
-}
-
 // ── Cola de operaciones pendientes ─────────────────────────────────────────
 class PendingOps extends Table {
   IntColumn get id => integer().autoIncrement()();
@@ -129,11 +70,8 @@ class CacheEntries extends Table {
 
 // ── Base de datos ──────────────────────────────────────────────────────────
 @DriftDatabase(tables: [
-  Transactions,
-  Quotes,
   InventoryItems,
   InventoryMovements,
-  Budgets,
   PendingOps,
   CacheEntries,
 ])
@@ -141,7 +79,19 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onUpgrade: (m, from, to) async {
+          // v1→v2: tablas transactions, quotes, budgets eliminadas (migradas a PocketBase)
+          if (from < 2) {
+            await customStatement('DROP TABLE IF EXISTS transactions');
+            await customStatement('DROP TABLE IF EXISTS quotes');
+            await customStatement('DROP TABLE IF EXISTS budgets');
+          }
+        },
+      );
 
   static LazyDatabase _openConnection() {
     return LazyDatabase(() async {

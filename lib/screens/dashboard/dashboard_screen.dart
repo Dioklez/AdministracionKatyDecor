@@ -7,7 +7,8 @@ import '../../services/api_service.dart';
 import '../../services/project_service.dart';
 import '../../models/project_model.dart';
 import '../../database/local_repository.dart';
-import '../../models/transaction.dart';
+import '../../services/transaction_service.dart';
+import '../../models/transaction_model.dart';
 import '../../models/chart_data.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/stat_card.dart';
@@ -56,38 +57,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final api = context.read<ApiService>();
 
-      // Construir query de transacciones con filtro de fechas opcional
-      String txnEndpoint = '/api/mobile/transactions';
-      final params = <String>[];
-      if (_dateFrom != null) {
-        params.add('date_from=${_dateFrom!.toIso8601String().substring(0, 10)}');
-      }
-      if (_dateTo != null) {
-        params.add('date_to=${_dateTo!.toIso8601String().substring(0, 10)}');
-      }
-      if (params.isNotEmpty) txnEndpoint += '?${params.join('&')}';
-
       final results = await Future.wait([
-        api.get(txnEndpoint),
-        api.get('/api/mobile/projects?status=active'),
+        TransactionService().getAll(),
+        ProjectService().getAll(),
         api.get('/api/graficas/ingreso-egreso'),
       ]);
 
       if (mounted) {
-        final txnList = (results[0] as List<dynamic>? ?? [])
-            .map((e) => Transaction.fromJson(e as Map<String, dynamic>))
-            .toList();
+        final txnList = results[0] as List<Transaction>;
+        final allProjects = results[1] as List<Project>;
 
-        final projectList = (results[1] as List<dynamic>? ?? []);
-
-        // Guardar en local (fire-and-forget)
+        // Guardar gráfica en cache local (fire-and-forget)
         final repo = context.read<LocalRepository>();
-        repo.upsertTransactions(txnList);
         repo.setCacheEntry('graficas/ingreso-egreso', jsonEncode(results[2]));
 
         setState(() {
           _transactions = txnList;
-          _activeProjects = projectList.length;
+          _activeProjects =
+              allProjects.where((p) => p.status == 'active').length;
           _chartData = MonthlyChartData.fromApiResponse(results[2]);
           _loading = false;
         });
@@ -102,11 +89,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _loadFromLocal() async {
     try {
       final repo = context.read<LocalRepository>();
-      final from = _dateFrom?.toIso8601String().substring(0, 10);
-      final to = _dateTo?.toIso8601String().substring(0, 10);
-      final txnList = await repo.getTransactionsByDateRange(from, to);
-      final allProjects = await ProjectService().getAll().catchError((_) => <Project>[]);
-      final activeProjects = allProjects.where((p) => p.status == 'active').toList();
       final cachedChart = await repo.getCacheEntry('graficas/ingreso-egreso');
       List<MonthlyChartData> chartData = [];
       if (cachedChart != null) {
@@ -116,8 +98,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
       if (mounted) {
         setState(() {
-          _transactions = txnList;
-          _activeProjects = activeProjects.length;
+          _transactions = [];
+          _activeProjects = 0;
           _chartData = chartData;
           _loading = false;
         });
@@ -167,17 +149,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── Cómputos client-side ───────────────────────────────────────────────────
 
+  List<Transaction> get _filtered {
+    var list = _transactions;
+    if (_dateFrom != null) {
+      final from = _dateFrom!.toIso8601String().substring(0, 10);
+      list = list.where((t) => t.date.compareTo(from) >= 0).toList();
+    }
+    if (_dateTo != null) {
+      final to = _dateTo!.toIso8601String().substring(0, 10);
+      list = list.where((t) => t.date.compareTo(to) <= 0).toList();
+    }
+    return list;
+  }
+
   double get _totalIncome =>
-      _transactions.where((t) => t.isIncome).fold(0.0, (s, t) => s + t.amountMxn);
+      _filtered.where((t) => t.isIncome).fold(0.0, (s, t) => s + t.amount);
 
   double get _totalExpense =>
-      _transactions.where((t) => !t.isIncome).fold(0.0, (s, t) => s + t.amountMxn);
+      _filtered.where((t) => !t.isIncome).fold(0.0, (s, t) => s + t.amount);
 
   double get _balance => _totalIncome - _totalExpense;
 
   List<Transaction> get _recentTransactions {
-    final sorted = List<Transaction>.from(_transactions)
-      ..sort((a, b) => b.transactionDate.compareTo(a.transactionDate));
+    final sorted = List<Transaction>.from(_filtered)
+      ..sort((a, b) => b.date.compareTo(a.date));
     return sorted.take(10).toList();
   }
 
@@ -808,38 +803,19 @@ class _DashboardTransactionRow extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  t.description.isNotEmpty
-                      ? t.description
-                      : (t.categoryName ?? 'Sin descripción'),
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: AppTheme.colorTexto,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (t.categoryName != null)
-                  Text(
-                    t.categoryName!,
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      color: AppTheme.colorTextoSecundario,
-                    ),
-                  ),
-              ],
+            child: Text(
+              t.description.isNotEmpty ? t.description : 'Sin descripción',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.colorTexto,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (t.projectName != null) ...[
-            const SizedBox(width: 8),
-            _ProjectPill(name: t.projectName!, colorHex: t.projectColor),
-          ],
           const SizedBox(width: 12),
           Text(
-            _formatDate(t.transactionDate),
+            _formatDate(t.date),
             style: GoogleFonts.inter(
               fontSize: 11,
               color: AppTheme.colorTextoSecundario,
@@ -847,7 +823,7 @@ class _DashboardTransactionRow extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Text(
-            '${isIncome ? '+' : '-'}\$${t.amountMxn.toStringAsFixed(0)}',
+            '${isIncome ? '+' : '-'}\$${t.amount.toStringAsFixed(0)}',
             style: GoogleFonts.inter(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -855,38 +831,6 @@ class _DashboardTransactionRow extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ProjectPill extends StatelessWidget {
-  final String name;
-  final String? colorHex;
-
-  const _ProjectPill({required this.name, this.colorHex});
-
-  Color _parseColor() {
-    if (colorHex != null && colorHex!.startsWith('#') && colorHex!.length == 7) {
-      try {
-        return Color(int.parse('FF${colorHex!.substring(1)}', radix: 16));
-      } catch (_) {}
-    }
-    return AppTheme.colorTextoSecundario;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = _parseColor();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: c.withAlpha(30),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        name,
-        style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w500, color: c),
       ),
     );
   }

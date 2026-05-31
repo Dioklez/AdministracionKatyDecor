@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
+import '../../services/transaction_service.dart';
+import '../../services/category_service.dart';
+import '../../services/account_service.dart';
 import '../../services/project_service.dart';
-import '../../database/local_repository.dart';
-import '../../widgets/sync_toast.dart';
-import '../../models/transaction.dart';
+import '../../models/transaction_model.dart';
+import '../../models/category_model.dart';
+import '../../models/account_model.dart';
 import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
@@ -23,10 +23,12 @@ class TransactionsScreen extends StatefulWidget {
 class _TransactionsScreenState extends State<TransactionsScreen> {
   List<Transaction> _transactions = [];
   List<Project> _projects = [];
+  List<Category> _categories = [];
+  List<Account> _accounts = [];
   bool _loading = true;
   String? _error;
 
-  // 'all' | 'general' | '<project_id>'
+  // 'all' | 'income' | 'expense' | '<project_id>'
   String _filterMode = 'all';
 
   @override
@@ -41,53 +43,24 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       _error = null;
     });
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
-
       final futures = <Future>[
-        _fetchTransactions(api),
+        TransactionService().getAll(),
         if (_projects.isEmpty) ProjectService().getAll(),
+        if (_categories.isEmpty) CategoryService().getAll(),
+        if (_accounts.isEmpty) AccountService().getAll(),
       ];
       final results = await Future.wait(futures);
       if (!mounted) return;
-      final txns = results[0] as List<Transaction>;
-      if (results.length > 1) {
-        _projects = results[1] as List<Project>;
-      }
-      repo.upsertTransactions(txns);
+      int idx = 0;
+      final txns = results[idx++] as List<Transaction>;
+      if (_projects.isEmpty) _projects = results[idx++] as List<Project>;
+      if (_categories.isEmpty) _categories = results[idx++] as List<Category>;
+      if (_accounts.isEmpty) _accounts = results[idx++] as List<Account>;
       setState(() {
         _transactions = txns;
         _loading = false;
       });
-    } on ApiOfflineException {
-      await _loadFromLocal();
     } catch (e) {
-      await _loadFromLocal();
-    }
-  }
-
-  Future<void> _loadFromLocal() async {
-    try {
-      final repo = context.read<LocalRepository>();
-      List<Transaction> txns;
-      if (_filterMode == 'general') {
-        txns = await repo.getTransactionsByScope('general');
-      } else if (_filterMode != 'all') {
-        final pid = int.tryParse(_filterMode);
-        txns = pid != null
-            ? await repo.getTransactionsByProjectId(pid)
-            : await repo.getAllTransactions();
-      } else {
-        txns = await repo.getAllTransactions();
-      }
-      if (!mounted) return;
-      setState(() {
-        _transactions = txns;
-        _projects = _projects;
-        _loading = false;
-        _error = null;
-      });
-    } catch (_) {
       if (mounted) {
         setState(() {
           _error = 'No se pudo cargar las transacciones.';
@@ -97,24 +70,29 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     }
   }
 
-  Future<List<Transaction>> _fetchTransactions(ApiService api) async {
-    String endpoint = '/api/mobile/transactions';
-    if (_filterMode == 'general') {
-      endpoint += '?scope=general';
-    } else if (_filterMode != 'all') {
-      endpoint += '?project_id=$_filterMode';
+  List<Transaction> get _filtered {
+    switch (_filterMode) {
+      case 'income':
+        return _transactions.where((t) => t.isIncome).toList();
+      case 'expense':
+        return _transactions.where((t) => !t.isIncome).toList();
+      case 'all':
+        return _transactions;
+      default:
+        return _transactions.where((t) => t.projectId == _filterMode).toList();
     }
-    final result = await api.get(endpoint);
-    return (result as List<dynamic>? ?? [])
-        .map((e) => Transaction.fromJson(e as Map<String, dynamic>))
-        .toList();
   }
 
   void _applyFilter(String mode) {
     if (_filterMode == mode) return;
     setState(() => _filterMode = mode);
-    _loadData();
   }
+
+  Category? _categoryById(String? id) =>
+      id == null ? null : _categories.where((c) => c.id == id).firstOrNull;
+
+  Project? _projectById(String? id) =>
+      id == null ? null : _projects.where((p) => p.id == id).firstOrNull;
 
   // ── Build ──────────────────────────────────────────────────────────────────
 
@@ -140,7 +118,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                 ),
                 const Spacer(),
                 ElevatedButton.icon(
-                  onPressed: () => _showAddTransactionDialog(),
+                  onPressed: () => _showTransactionDialog(),
                   icon: const Icon(Icons.add, size: 16),
                   label: const Text('Agregar transacción'),
                 ),
@@ -148,12 +126,11 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
             ),
           ),
 
-          // ── Filtros por proyecto ────────────────────────────────────────
-          if (!_loading || _projects.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
-              child: _buildFilterChips(),
-            ),
+          // ── Filtros ────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
+            child: _buildFilterChips(),
+          ),
 
           const Divider(height: 1),
 
@@ -182,19 +159,26 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           ),
           const SizedBox(width: 8),
           _FilterChip(
-            label: 'Generales',
-            selected: _filterMode == 'general',
-            onSelected: () => _applyFilter('general'),
+            label: 'Ingresos',
+            selected: _filterMode == 'income',
+            color: AppTheme.colorExito,
+            onSelected: () => _applyFilter('income'),
+          ),
+          const SizedBox(width: 8),
+          _FilterChip(
+            label: 'Egresos',
+            selected: _filterMode == 'expense',
+            color: AppTheme.colorError,
+            onSelected: () => _applyFilter('expense'),
           ),
           ..._projects.map((p) {
-            final id = p.id.toString();
             return Padding(
               padding: const EdgeInsets.only(left: 8),
               child: _FilterChip(
                 label: p.name,
-                selected: _filterMode == id,
+                selected: _filterMode == p.id,
                 color: p.displayColor,
-                onSelected: () => _applyFilter(id),
+                onSelected: () => _applyFilter(p.id),
               ),
             );
           }),
@@ -204,25 +188,29 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   Widget _buildTransactionsList() {
-    if (_transactions.isEmpty) {
+    final txns = _filtered;
+    if (txns.isEmpty) {
       return EmptyState(
         icon: Icons.swap_vert,
         title: 'Sin transacciones',
-        subtitle: _filterMode == 'general'
-            ? 'No hay transacciones generales registradas'
-            : _filterMode != 'all'
-                ? 'No hay transacciones para este proyecto'
-                : 'No hay transacciones registradas',
+        subtitle: 'No hay transacciones registradas',
         actionLabel: 'Agregar transacción',
-        onAction: _showAddTransactionDialog,
+        onAction: _showTransactionDialog,
       );
     }
 
     return ListView.builder(
       padding: const EdgeInsets.all(28),
-      itemCount: _transactions.length,
+      itemCount: txns.length,
       itemBuilder: (context, index) {
-        return _TransactionRow(transaction: _transactions[index]);
+        final t = txns[index];
+        return _TransactionRow(
+          transaction: t,
+          category: _categoryById(t.categoryId),
+          project: _projectById(t.projectId),
+          onEdit: () => _showTransactionDialog(transaction: t),
+          onDelete: () => _deleteTransaction(t),
+        );
       },
     );
   }
@@ -251,7 +239,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.wifi_off_outlined,
+          const Icon(Icons.error_outline,
               size: 48, color: AppTheme.colorTextoSecundario),
           const SizedBox(height: 12),
           Text(_error!,
@@ -263,13 +251,48 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     );
   }
 
-  // ── Diálogo: Agregar transacción ──────────────────────────────────────────
+  Future<void> _deleteTransaction(Transaction t) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar transacción'),
+        content: Text('¿Eliminar "${t.description}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.colorError),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await TransactionService().delete(t.id);
+      await _loadData();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo eliminar la transacción.')),
+        );
+      }
+    }
+  }
 
-  void _showAddTransactionDialog() {
+  void _showTransactionDialog({Transaction? transaction}) {
     showDialog(
       context: context,
-      builder: (ctx) => _AddTransactionDialog(
+      builder: (ctx) => _TransactionDialog(
+        transaction: transaction,
         projects: _projects,
+        categories: _categories,
+        accounts: _accounts,
         onSaved: () {
           Navigator.of(ctx).pop();
           _loadData();
@@ -340,8 +363,18 @@ class _FilterChip extends StatelessWidget {
 
 class _TransactionRow extends StatelessWidget {
   final Transaction transaction;
+  final Category? category;
+  final Project? project;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
-  const _TransactionRow({required this.transaction});
+  const _TransactionRow({
+    required this.transaction,
+    this.category,
+    this.project,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
   String _formatDate(String date) {
     if (date.length >= 10) {
@@ -351,11 +384,10 @@ class _TransactionRow extends StatelessWidget {
     return date;
   }
 
-  String _formatMxn(double value) {
+  String _formatAmount(double value) {
     final abs = value.abs();
-    String formatted;
     if (abs >= 1000000) {
-      formatted = '\$${(abs / 1000000).toStringAsFixed(1)}M';
+      return '\$${(abs / 1000000).toStringAsFixed(1)}M';
     } else if (abs >= 1000) {
       final s = abs.toStringAsFixed(0);
       final buf = StringBuffer();
@@ -363,11 +395,10 @@ class _TransactionRow extends StatelessWidget {
         if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
         buf.write(s[i]);
       }
-      formatted = '\$$buf';
+      return '\$$buf';
     } else {
-      formatted = '\$${abs.toStringAsFixed(0)}';
+      return '\$${abs.toStringAsFixed(0)}';
     }
-    return formatted;
   }
 
   @override
@@ -390,7 +421,8 @@ class _TransactionRow extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: (isIncome ? AppTheme.colorExito : AppTheme.colorError).withAlpha(26),
+              color: (isIncome ? AppTheme.colorExito : AppTheme.colorError)
+                  .withAlpha(26),
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -403,15 +435,13 @@ class _TransactionRow extends StatelessWidget {
           ),
           const SizedBox(width: 12),
 
-          // Descripción + categoría
+          // Descripción + categoría / proyecto
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  t.description.isNotEmpty
-                      ? t.description
-                      : (t.categoryName ?? 'Sin descripción'),
+                  t.description.isNotEmpty ? t.description : 'Sin descripción',
                   style: GoogleFonts.inter(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
@@ -422,9 +452,9 @@ class _TransactionRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    if (t.categoryName != null) ...[
+                    if (category != null) ...[
                       Text(
-                        t.categoryName!,
+                        category!.name,
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           color: AppTheme.colorTextoSecundario,
@@ -432,13 +462,13 @@ class _TransactionRow extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                     ],
-                    if (t.projectName != null)
+                    if (project != null)
                       ProjectBadge(
-                        projectName: t.projectName!,
-                        colorHex: t.projectColor,
+                        projectName: project!.name,
+                        colorHex: project!.color,
                       )
                     else
-                      ProjectBadge(projectName: 'General'),
+                      const ProjectBadge(projectName: 'General'),
                   ],
                 ),
               ],
@@ -448,7 +478,7 @@ class _TransactionRow extends StatelessWidget {
 
           // Fecha
           Text(
-            _formatDate(t.transactionDate),
+            _formatDate(t.date),
             style: GoogleFonts.inter(
               fontSize: 12,
               color: AppTheme.colorTextoSecundario,
@@ -458,12 +488,27 @@ class _TransactionRow extends StatelessWidget {
 
           // Monto
           Text(
-            '${isIncome ? '+' : '-'}${_formatMxn(t.amountMxn)}',
+            '${isIncome ? '+' : '-'}${_formatAmount(t.amount)}',
             style: GoogleFonts.inter(
               fontSize: 14,
               fontWeight: FontWeight.w600,
               color: isIncome ? AppTheme.colorExito : AppTheme.colorError,
             ),
+          ),
+          const SizedBox(width: 8),
+
+          // Acciones
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert,
+                size: 18, color: AppTheme.colorTextoSecundario),
+            onSelected: (v) {
+              if (v == 'edit') onEdit();
+              if (v == 'delete') onDelete();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('Editar')),
+              PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+            ],
           ),
         ],
       ),
@@ -471,39 +516,61 @@ class _TransactionRow extends StatelessWidget {
   }
 }
 
-// ── Diálogo para agregar transacción ──────────────────────────────────────────
+// ── Diálogo crear/editar transacción ─────────────────────────────────────────
 
-class _AddTransactionDialog extends StatefulWidget {
+class _TransactionDialog extends StatefulWidget {
+  final Transaction? transaction;
   final List<Project> projects;
+  final List<Category> categories;
+  final List<Account> accounts;
   final VoidCallback onSaved;
 
-  const _AddTransactionDialog({
+  const _TransactionDialog({
+    this.transaction,
     required this.projects,
+    required this.categories,
+    required this.accounts,
     required this.onSaved,
   });
 
   @override
-  State<_AddTransactionDialog> createState() => _AddTransactionDialogState();
+  State<_TransactionDialog> createState() => _TransactionDialogState();
 }
 
-class _AddTransactionDialogState extends State<_AddTransactionDialog> {
+class _TransactionDialogState extends State<_TransactionDialog> {
   final _formKey = GlobalKey<FormState>();
-  String _type = 'expense';
-  final _descController = TextEditingController();
-  final _amountController = TextEditingController();
-  String _currency = 'MXN';
-  final _exchangeController = TextEditingController(text: '1');
-  final _notesController = TextEditingController();
+  late String _type;
+  late TextEditingController _descController;
+  late TextEditingController _amountController;
+  late TextEditingController _notesController;
   String? _selectedProjectId;
-  DateTime _date = DateTime.now();
+  String? _selectedCategoryId;
+  String? _selectedAccountId;
+  late DateTime _date;
   bool _saving = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final t = widget.transaction;
+    _type = t?.type ?? 'expense';
+    _descController = TextEditingController(text: t?.description ?? '');
+    _amountController =
+        TextEditingController(text: t != null ? t.amount.toStringAsFixed(2) : '');
+    _notesController = TextEditingController(text: t?.notes ?? '');
+    _selectedProjectId = t?.projectId;
+    _selectedCategoryId = t?.categoryId;
+    _selectedAccountId = t?.accountId;
+    _date = t != null && t.date.isNotEmpty
+        ? DateTime.tryParse(t.date) ?? DateTime.now()
+        : DateTime.now();
+  }
 
   @override
   void dispose() {
     _descController.dispose();
     _amountController.dispose();
-    _exchangeController.dispose();
     _notesController.dispose();
     super.dispose();
   }
@@ -516,7 +583,7 @@ class _AddTransactionDialogState extends State<_AddTransactionDialog> {
       context: context,
       initialDate: _date,
       firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
+      lastDate: DateTime(2035),
     );
     if (picked != null && mounted) setState(() => _date = picked);
   }
@@ -527,47 +594,24 @@ class _AddTransactionDialogState extends State<_AddTransactionDialog> {
       _saving = true;
       _error = null;
     });
-    final amount = double.tryParse(_amountController.text) ?? 0.0;
-    final exchangeRate = double.tryParse(_exchangeController.text) ?? 1.0;
-    final amountMxn = _currency == 'MXN' ? amount : amount * exchangeRate;
     final body = <String, dynamic>{
-      'type': _type,
-      'scope_type': _selectedProjectId != null ? 'project' : 'general',
-      if (_selectedProjectId != null) 'scope_id': _selectedProjectId,
       'description': _descController.text.trim(),
-      'amount': amount,
-      'currency': _currency,
-      'exchange_rate': exchangeRate,
-      'amount_mxn': amountMxn,
-      'transaction_date': _date.toIso8601String().substring(0, 10),
-      if (_notesController.text.isNotEmpty) 'notes': _notesController.text.trim(),
+      'amount': double.tryParse(_amountController.text) ?? 0.0,
+      'type': _type,
+      'date': _date.toIso8601String().substring(0, 10),
+      'projectId': _selectedProjectId ?? '',
+      'categoryId': _selectedCategoryId ?? '',
+      'accountId': _selectedAccountId ?? '',
+      'notes': _notesController.text.trim(),
     };
-
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
-      final result = await api.post('/api/mobile/transactions', body);
-      if (result != null) {
-        repo.upsertTransaction(
-            Transaction.fromJson(result as Map<String, dynamic>));
+      final svc = TransactionService();
+      if (widget.transaction == null) {
+        await svc.create(body);
+      } else {
+        await svc.update(widget.transaction!.id, body);
       }
       if (mounted) widget.onSaved();
-    } on ApiOfflineException {
-      final repo = context.read<LocalRepository>();
-      final tempId = -DateTime.now().millisecondsSinceEpoch;
-      await repo.addPendingOp(
-        entityType: 'transaction', operation: 'create',
-        tempId: tempId, endpoint: '/api/mobile/transactions',
-        payload: jsonEncode(body),
-      );
-      repo.upsertTransaction(Transaction.fromJson({
-        ...body, 'id': tempId,
-        'created_at': DateTime.now().toIso8601String(),
-      }));
-      if (mounted) {
-        SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-        widget.onSaved();
-      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -580,9 +624,10 @@ class _AddTransactionDialogState extends State<_AddTransactionDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isEdit = widget.transaction != null;
     return AlertDialog(
       title: Text(
-        'Nueva transacción',
+        isEdit ? 'Editar transacción' : 'Nueva transacción',
         style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
       ),
       content: SizedBox(
@@ -629,46 +674,36 @@ class _AddTransactionDialogState extends State<_AddTransactionDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // Monto + moneda
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: TextFormField(
-                        controller: _amountController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Monto'),
-                        validator: (v) {
-                          if (v == null || v.isEmpty) return 'Requerido';
-                          if (double.tryParse(v) == null) return 'Número inválido';
-                          return null;
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 2,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _currency,
-                        items: const [
-                          DropdownMenuItem(value: 'MXN', child: Text('MXN')),
-                          DropdownMenuItem(value: 'USD', child: Text('USD')),
-                        ],
-                        onChanged: (v) => setState(() => _currency = v ?? 'MXN'),
-                        decoration: const InputDecoration(labelText: 'Moneda'),
-                      ),
-                    ),
-                  ],
+                // Monto
+                TextFormField(
+                  controller: _amountController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                      labelText: 'Monto (MXN)', prefixText: '\$ '),
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Requerido';
+                    if (double.tryParse(v) == null) return 'Número inválido';
+                    return null;
+                  },
                 ),
-                if (_currency != 'MXN') ...[
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _exchangeController,
-                    keyboardType: TextInputType.number,
-                    decoration:
-                        const InputDecoration(labelText: 'Tipo de cambio (MXN/USD)'),
-                  ),
-                ],
+                const SizedBox(height: 12),
+
+                // Categoría
+                DropdownButtonFormField<String?>(
+                  value: _selectedCategoryId,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('Sin categoría')),
+                    ...widget.categories.map((c) => DropdownMenuItem<String?>(
+                          value: c.id,
+                          child: Text(c.name),
+                        )),
+                  ],
+                  onChanged: (v) => setState(() => _selectedCategoryId = v),
+                  decoration:
+                      const InputDecoration(labelText: 'Categoría (opcional)'),
+                ),
                 const SizedBox(height: 12),
 
                 // Proyecto
@@ -683,7 +718,25 @@ class _AddTransactionDialogState extends State<_AddTransactionDialog> {
                         )),
                   ],
                   onChanged: (v) => setState(() => _selectedProjectId = v),
-                  decoration: const InputDecoration(labelText: 'Proyecto (opcional)'),
+                  decoration:
+                      const InputDecoration(labelText: 'Proyecto (opcional)'),
+                ),
+                const SizedBox(height: 12),
+
+                // Cuenta
+                DropdownButtonFormField<String?>(
+                  value: _selectedAccountId,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('Sin cuenta')),
+                    ...widget.accounts.map((a) => DropdownMenuItem<String?>(
+                          value: a.id,
+                          child: Text(a.name),
+                        )),
+                  ],
+                  onChanged: (v) => setState(() => _selectedAccountId = v),
+                  decoration:
+                      const InputDecoration(labelText: 'Cuenta (opcional)'),
                 ),
                 const SizedBox(height: 12),
 
@@ -702,7 +755,8 @@ class _AddTransactionDialogState extends State<_AddTransactionDialog> {
                 TextFormField(
                   controller: _notesController,
                   maxLines: 2,
-                  decoration: const InputDecoration(labelText: 'Notas (opcional)'),
+                  decoration:
+                      const InputDecoration(labelText: 'Notas (opcional)'),
                 ),
 
                 if (_error != null) ...[
@@ -730,7 +784,7 @@ class _AddTransactionDialogState extends State<_AddTransactionDialog> {
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white),
                 )
-              : const Text('Guardar'),
+              : Text(isEdit ? 'Guardar cambios' : 'Guardar'),
         ),
       ],
     );
@@ -770,7 +824,9 @@ class _TypeButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 16, color: selected ? color : AppTheme.colorTextoSecundario),
+            Icon(icon,
+                size: 16,
+                color: selected ? color : AppTheme.colorTextoSecundario),
             const SizedBox(width: 6),
             Text(
               label,

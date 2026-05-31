@@ -1,161 +1,11 @@
 import 'package:drift/drift.dart';
-import '../models/transaction.dart';
-import '../models/quote.dart';
 import '../models/inventory_item.dart';
 import '../models/inventory_movement.dart';
-import '../models/budget.dart';
 import 'app_database.dart';
 
 class LocalRepository {
   final AppDatabase _db;
   LocalRepository(this._db);
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // TRANSACCIONES
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<Transaction>> getAllTransactions() async {
-    final rows = await _db.select(_db.transactions).get();
-    return rows.map(_txFromRow).toList();
-  }
-
-  Future<List<Transaction>> getTransactionsByDateRange(
-      String? from, String? to) async {
-    final query = _db.select(_db.transactions);
-    if (from != null) {
-      query.where((t) => t.transactionDate.isBiggerOrEqualValue(from));
-    }
-    if (to != null) {
-      query.where((t) => t.transactionDate.isSmallerOrEqualValue(to));
-    }
-    final rows = await query.get();
-    return rows.map(_txFromRow).toList();
-  }
-
-  Future<List<Transaction>> getTransactionsByProjectId(int projectId) async {
-    final rows = await (_db.select(_db.transactions)
-          ..where((t) => t.scopeId.equals(projectId))
-          ..where((t) => t.scopeType.equals('project')))
-        .get();
-    return rows.map(_txFromRow).toList();
-  }
-
-  Future<List<Transaction>> getTransactionsByScope(String scope) async {
-    final rows = await (_db.select(_db.transactions)
-          ..where((t) => t.scopeType.equals(scope)))
-        .get();
-    return rows.map(_txFromRow).toList();
-  }
-
-  Future<void> upsertTransaction(Transaction t) async {
-    await _db.into(_db.transactions).insertOnConflictUpdate(_txToCompanion(t));
-  }
-
-  Future<void> upsertTransactions(List<Transaction> txns) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-          _db.transactions, txns.map(_txToCompanion).toList());
-    });
-  }
-
-  Future<void> deleteTransaction(int id) async {
-    await (_db.delete(_db.transactions)..where((t) => t.id.equals(id))).go();
-  }
-
-  Future<void> clearTransactions() async {
-    await _db.delete(_db.transactions).go();
-  }
-
-  Transaction _txFromRow(TransactionRow row) => Transaction.fromJson({
-        'id': row.id,
-        'type': row.type,
-        'scope_type': row.scopeType,
-        'scope_id': row.scopeId,
-        'category_id': row.categoryId,
-        'category_name': row.categoryName,
-        'project_name': row.projectName,
-        'project_color': row.projectColor,
-        'description': row.description,
-        'amount': row.amount,
-        'currency': row.currency,
-        'exchange_rate': row.exchangeRate,
-        'amount_mxn': row.amountMxn,
-        'transaction_date': row.transactionDate,
-        'etapa': row.etapa,
-        'notes': row.notes,
-        'created_at': row.createdAt,
-      });
-
-  TransactionsCompanion _txToCompanion(Transaction t) => TransactionsCompanion(
-        id: Value(t.id),
-        type: Value(t.type),
-        scopeType: Value(t.scopeType),
-        scopeId: Value(t.scopeId),
-        categoryId: Value(t.categoryId),
-        categoryName: Value(t.categoryName),
-        projectName: Value(t.projectName),
-        projectColor: Value(t.projectColor),
-        description: Value(t.description),
-        amount: Value(t.amount),
-        currency: Value(t.currency),
-        exchangeRate: Value(t.exchangeRate),
-        amountMxn: Value(t.amountMxn),
-        transactionDate: Value(t.transactionDate),
-        etapa: Value(t.etapa),
-        notes: Value(t.notes),
-        createdAt: Value(t.createdAt),
-      );
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // COTIZACIONES
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<Quote>> getAllQuotes() async {
-    final rows = await _db.select(_db.quotes).get();
-    return rows.map(_quoteFromRow).toList();
-  }
-
-  Future<List<Quote>> getQuotesByProjectId(int projectId) async {
-    final rows = await (_db.select(_db.quotes)
-          ..where((t) => t.projectId.equals(projectId)))
-        .get();
-    return rows.map(_quoteFromRow).toList();
-  }
-
-  Future<void> upsertQuote(Quote q) async {
-    await _db.into(_db.quotes).insertOnConflictUpdate(_quoteToCompanion(q));
-  }
-
-  Future<void> upsertQuotes(List<Quote> quotes) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-          _db.quotes, quotes.map(_quoteToCompanion).toList());
-    });
-  }
-
-  Future<void> deleteQuote(int id) async {
-    await (_db.delete(_db.quotes)..where((t) => t.id.equals(id))).go();
-  }
-
-  Quote _quoteFromRow(QuoteRow row) => Quote.fromJson({
-        'id': row.id,
-        'project_id': row.projectId,
-        'description': row.description,
-        'amount_mxn': row.amountMxn,
-        'currency': row.currency,
-        'status': row.status,
-        'created_at': row.createdAt,
-      });
-
-  QuotesCompanion _quoteToCompanion(Quote q) => QuotesCompanion(
-        id: Value(q.id),
-        projectId: Value(q.projectId),
-        description: Value(q.description),
-        amountMxn: Value(q.amountMxn),
-        currency: Value(q.currency),
-        status: Value(q.status),
-        createdAt: Value(q.createdAt),
-      );
 
   // ═══════════════════════════════════════════════════════════════════════
   // INVENTARIO
@@ -282,58 +132,6 @@ class LocalRepository {
       );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // PRESUPUESTOS
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<Budget>> getBudgets() async {
-    final rows = await _db.select(_db.budgets).get();
-    return rows.map(_budgetFromRow).toList();
-  }
-
-  Future<void> upsertBudgets(List<Budget> budgets) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-          _db.budgets, budgets.map(_budgetToCompanion).toList());
-    });
-  }
-
-  Future<void> deleteBudget(int budgetId) async {
-    await (_db.delete(_db.budgets)
-          ..where((t) => t.budgetId.equals(budgetId)))
-        .go();
-  }
-
-  Future<void> clearBudgets() async {
-    await _db.delete(_db.budgets).go();
-  }
-
-  Budget _budgetFromRow(BudgetRow row) => Budget.fromJson({
-        'budget_id': row.budgetId,
-        'category_id': row.categoryId,
-        'category_name': row.categoryName,
-        'scope_type': row.scopeType,
-        'limit': row.budgetLimit,
-        'spent': row.spent,
-        'remaining': row.remaining,
-        'pct': row.pct,
-        'alert_level': row.alertLevel,
-        'alert_threshold_pct': row.alertThresholdPct,
-      });
-
-  BudgetsCompanion _budgetToCompanion(Budget b) => BudgetsCompanion(
-        budgetId: Value(b.budgetId),
-        categoryId: Value(b.categoryId),
-        categoryName: Value(b.categoryName),
-        scopeType: Value(b.scopeType),
-        budgetLimit: Value(b.limit),
-        spent: Value(b.spent),
-        remaining: Value(b.remaining),
-        pct: Value(b.pct),
-        alertLevel: Value(b.alertLevel),
-        alertThresholdPct: Value(b.alertThresholdPct),
-      );
-
-  // ═══════════════════════════════════════════════════════════════════════
   // COLA DE OPERACIONES PENDIENTES
   // ═══════════════════════════════════════════════════════════════════════
 
@@ -393,9 +191,6 @@ class LocalRepository {
   Future<void> updateLocalId(
       String entityType, int tempId, int realId) async {
     switch (entityType) {
-      case 'quote':
-        await _db.customStatement(
-            'UPDATE quotes SET id = ? WHERE id = ?', [realId, tempId]);
       case 'task':
         await _db.customStatement(
             'UPDATE tasks SET id = ? WHERE id = ?', [realId, tempId]);
