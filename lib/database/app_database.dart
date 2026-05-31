@@ -109,39 +109,6 @@ class Tasks extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-// ── Cuentas por cobrar/pagar ───────────────────────────────────────────────
-@DataClassName('AccountRow')
-class Accounts extends Table {
-  IntColumn get id => integer()();
-  TextColumn get tipo => text()();
-  TextColumn get contraparte => text()();
-  TextColumn get descripcion => text().nullable()();
-  RealColumn get montoOriginal => real()();
-  RealColumn get pagado => real().withDefault(const Constant(0.0))();
-  RealColumn get saldo => real().withDefault(const Constant(0.0))();
-  TextColumn get estado => text().withDefault(const Constant('pendiente'))();
-  TextColumn get fecha => text().nullable()();
-  TextColumn get notas => text().nullable()();
-  TextColumn get createdAt => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
-// ── Pagos de cuentas ───────────────────────────────────────────────────────
-@DataClassName('AccountPaymentRow')
-class AccountPayments extends Table {
-  IntColumn get id => integer()();
-  IntColumn get accountId => integer()();
-  RealColumn get monto => real()();
-  TextColumn get fecha => text().nullable()();
-  TextColumn get notas => text().nullable()();
-  TextColumn get createdAt => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
 // ── Inventario ─────────────────────────────────────────────────────────────
 @DataClassName('InventoryItemRow')
 class InventoryItems extends Table {
@@ -231,8 +198,6 @@ class CacheEntries extends Table {
   SupplierProducts,
   Quotes,
   Tasks,
-  Accounts,
-  AccountPayments,
   InventoryItems,
   InventoryMovements,
   Budgets,

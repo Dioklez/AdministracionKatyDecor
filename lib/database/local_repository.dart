@@ -5,8 +5,6 @@ import '../models/supplier.dart';
 import '../models/supplier_product.dart';
 import '../models/quote.dart';
 import '../models/task.dart';
-import '../models/account.dart';
-import '../models/account_payment.dart';
 import '../models/inventory_item.dart';
 import '../models/inventory_movement.dart';
 import '../models/budget.dart';
@@ -394,122 +392,6 @@ class LocalRepository {
         completada: Value(t.completada),
         proyectoId: Value(t.proyectoId),
         notas: Value(t.notas),
-      );
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // CUENTAS
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<Account>> getAllAccounts() async {
-    final rows = await _db.select(_db.accounts).get();
-    return rows.map(_accountFromRow).toList();
-  }
-
-  Future<List<Account>> getAccountsFiltered(
-      {String? tipo, String? estado}) async {
-    final query = _db.select(_db.accounts);
-    if (tipo != null) query.where((t) => t.tipo.equals(tipo));
-    if (estado != null) query.where((t) => t.estado.equals(estado));
-    final rows = await query.get();
-    return rows.map(_accountFromRow).toList();
-  }
-
-  Future<Account?> getAccountById(int id) async {
-    final row = await (_db.select(_db.accounts)
-          ..where((t) => t.id.equals(id)))
-        .getSingleOrNull();
-    return row != null ? _accountFromRow(row) : null;
-  }
-
-  Future<void> upsertAccount(Account a) async {
-    await _db
-        .into(_db.accounts)
-        .insertOnConflictUpdate(_accountToCompanion(a));
-  }
-
-  Future<void> upsertAccounts(List<Account> accounts) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-          _db.accounts, accounts.map(_accountToCompanion).toList());
-    });
-  }
-
-  Future<void> deleteAccount(int id) async {
-    await (_db.delete(_db.accounts)..where((t) => t.id.equals(id))).go();
-    await (_db.delete(_db.accountPayments)
-          ..where((t) => t.accountId.equals(id)))
-        .go();
-  }
-
-  Account _accountFromRow(AccountRow row) => Account.fromJson({
-        'id': row.id,
-        'tipo': row.tipo,
-        'contraparte': row.contraparte,
-        'descripcion': row.descripcion,
-        'monto_original': row.montoOriginal,
-        'pagado': row.pagado,
-        'saldo': row.saldo,
-        'estado': row.estado,
-        'fecha': row.fecha,
-        'notas': row.notas,
-        'created_at': row.createdAt,
-      });
-
-  AccountsCompanion _accountToCompanion(Account a) => AccountsCompanion(
-        id: Value(a.id),
-        tipo: Value(a.tipo),
-        contraparte: Value(a.contraparte),
-        descripcion: Value(a.descripcion),
-        montoOriginal: Value(a.montoOriginal),
-        pagado: Value(a.pagado),
-        saldo: Value(a.saldo),
-        estado: Value(a.estado),
-        fecha: Value(a.fecha),
-        notas: Value(a.notas),
-        createdAt: Value(a.createdAt),
-      );
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // PAGOS DE CUENTAS
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<AccountPayment>> getPaymentsByAccountId(int accountId) async {
-    final rows = await (_db.select(_db.accountPayments)
-          ..where((t) => t.accountId.equals(accountId)))
-        .get();
-    return rows.map(_paymentFromRow).toList();
-  }
-
-  Future<void> upsertPayments(List<AccountPayment> payments) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-          _db.accountPayments, payments.map(_paymentToCompanion).toList());
-    });
-  }
-
-  Future<void> deletePayment(int id) async {
-    await (_db.delete(_db.accountPayments)..where((t) => t.id.equals(id)))
-        .go();
-  }
-
-  AccountPayment _paymentFromRow(AccountPaymentRow row) =>
-      AccountPayment.fromJson({
-        'id': row.id,
-        'account_id': row.accountId,
-        'monto': row.monto,
-        'fecha': row.fecha,
-        'notas': row.notas,
-        'created_at': row.createdAt,
-      });
-
-  AccountPaymentsCompanion _paymentToCompanion(AccountPayment p) =>
-      AccountPaymentsCompanion(
-        id: Value(p.id),
-        accountId: Value(p.accountId),
-        monto: Value(p.monto),
-        fecha: Value(p.fecha),
-        notas: Value(p.notas),
-        createdAt: Value(p.createdAt),
       );
 
   // ═══════════════════════════════════════════════════════════════════════

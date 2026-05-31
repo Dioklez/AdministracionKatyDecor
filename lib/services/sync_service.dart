@@ -6,8 +6,6 @@ import '../models/supplier.dart';
 import '../models/supplier_product.dart';
 import '../models/quote.dart';
 import '../models/task.dart';
-import '../models/account.dart';
-import '../models/account_payment.dart';
 import '../models/inventory_item.dart';
 import '../models/inventory_movement.dart';
 import '../models/budget.dart';
@@ -160,7 +158,6 @@ class SyncService {
       _safePull('suppliers', errors, _pullSuppliers),
       _safePull('quotes', errors, _pullQuotes),
       _safePull('tasks', errors, _pullTasks),
-      _safePull('accounts', errors, _pullAccounts),
       _safePull('inventory', errors, _pullInventory),
       _safePull('budgets', errors, () => _pullBudgets(now.month, now.year, skipClear: skipClear)),
       _safePull('chart', errors, _pullChartData),
@@ -224,14 +221,6 @@ class SyncService {
     await _repo.upsertTasks(list);
   }
 
-  Future<void> _pullAccounts() async {
-    final data = await _api.get('/api/mobile/accounts');
-    final list = (data as List)
-        .map((e) => Account.fromJson(e as Map<String, dynamic>))
-        .toList();
-    await _repo.upsertAccounts(list);
-  }
-
   Future<void> _pullInventory() async {
     final data = await _api.get('/api/mobile/inventory');
     final list = (data as List)
@@ -263,12 +252,6 @@ class SyncService {
   Future<void> cacheSupplierProducts(
       int supplierId, List<SupplierProduct> products) async {
     await _repo.upsertSupplierProducts(supplierId, products);
-  }
-
-  /// Guarda pagos de una cuenta en local después de cargarlos.
-  Future<void> cacheAccountPayments(
-      int accountId, List<AccountPayment> payments) async {
-    await _repo.upsertPayments(payments);
   }
 
   /// Guarda movimientos de inventario en local después de cargarlos.
