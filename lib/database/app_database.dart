@@ -46,20 +46,6 @@ class Quotes extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-// ── Tareas ─────────────────────────────────────────────────────────────────
-@DataClassName('TaskRow')
-class Tasks extends Table {
-  IntColumn get id => integer()();
-  TextColumn get fecha => text()();
-  TextColumn get descripcion => text()();
-  BoolColumn get completada => boolean().withDefault(const Constant(false))();
-  IntColumn get proyectoId => integer().nullable()();
-  TextColumn get notas => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
 // ── Inventario ─────────────────────────────────────────────────────────────
 @DataClassName('InventoryItemRow')
 class InventoryItems extends Table {
@@ -145,7 +131,6 @@ class CacheEntries extends Table {
 @DriftDatabase(tables: [
   Transactions,
   Quotes,
-  Tasks,
   InventoryItems,
   InventoryMovements,
   Budgets,

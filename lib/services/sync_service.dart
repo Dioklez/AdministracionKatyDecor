@@ -2,7 +2,6 @@ import 'dart:convert';
 import '../database/local_repository.dart';
 import '../models/transaction.dart';
 import '../models/quote.dart';
-import '../models/task.dart';
 import '../models/inventory_item.dart';
 import '../models/inventory_movement.dart';
 import '../models/budget.dart';
@@ -152,8 +151,7 @@ class SyncService {
     final futures = [
       _safePull('transactions', errors, () => _pullTransactions(skipClear: skipClear)),
       _safePull('quotes', errors, _pullQuotes),
-      _safePull('tasks', errors, _pullTasks),
-      _safePull('inventory', errors, _pullInventory),
+_safePull('inventory', errors, _pullInventory),
       _safePull('budgets', errors, () => _pullBudgets(now.month, now.year, skipClear: skipClear)),
       _safePull('chart', errors, _pullChartData),
     ];
@@ -187,14 +185,6 @@ class SyncService {
         .map((e) => Quote.fromJson(e as Map<String, dynamic>))
         .toList();
     await _repo.upsertQuotes(list);
-  }
-
-  Future<void> _pullTasks() async {
-    final data = await _api.get('/api/mobile/tasks');
-    final list = (data as List)
-        .map((e) => Task.fromJson(e as Map<String, dynamic>))
-        .toList();
-    await _repo.upsertTasks(list);
   }
 
   Future<void> _pullInventory() async {

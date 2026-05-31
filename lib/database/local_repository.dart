@@ -1,7 +1,6 @@
 import 'package:drift/drift.dart';
 import '../models/transaction.dart';
 import '../models/quote.dart';
-import '../models/task.dart';
 import '../models/inventory_item.dart';
 import '../models/inventory_movement.dart';
 import '../models/budget.dart';
@@ -156,55 +155,6 @@ class LocalRepository {
         currency: Value(q.currency),
         status: Value(q.status),
         createdAt: Value(q.createdAt),
-      );
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // TAREAS
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<Task>> getAllTasks() async {
-    final rows = await _db.select(_db.tasks).get();
-    return rows.map(_taskFromRow).toList();
-  }
-
-  Future<List<Task>> getTasksByProjectId(int projectId) async {
-    final rows = await (_db.select(_db.tasks)
-          ..where((t) => t.proyectoId.equals(projectId)))
-        .get();
-    return rows.map(_taskFromRow).toList();
-  }
-
-  Future<void> upsertTask(Task t) async {
-    await _db.into(_db.tasks).insertOnConflictUpdate(_taskToCompanion(t));
-  }
-
-  Future<void> upsertTasks(List<Task> tasks) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-          _db.tasks, tasks.map(_taskToCompanion).toList());
-    });
-  }
-
-  Future<void> deleteTask(int id) async {
-    await (_db.delete(_db.tasks)..where((t) => t.id.equals(id))).go();
-  }
-
-  Task _taskFromRow(TaskRow row) => Task.fromJson({
-        'id': row.id,
-        'fecha': row.fecha,
-        'descripcion': row.descripcion,
-        'completada': row.completada,
-        'proyecto_id': row.proyectoId,
-        'notas': row.notas,
-      });
-
-  TasksCompanion _taskToCompanion(Task t) => TasksCompanion(
-        id: Value(t.id),
-        fecha: Value(t.fecha),
-        descripcion: Value(t.descripcion),
-        completada: Value(t.completada),
-        proyectoId: Value(t.proyectoId),
-        notas: Value(t.notas),
       );
 
   // ═══════════════════════════════════════════════════════════════════════

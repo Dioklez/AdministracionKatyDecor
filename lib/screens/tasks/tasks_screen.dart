@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
+import '../../services/task_service.dart';
 import '../../services/project_service.dart';
-import '../../database/local_repository.dart';
-import '../../widgets/sync_toast.dart';
-import '../../models/task.dart';
+import '../../models/task_model.dart';
 import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
@@ -21,6 +17,7 @@ class TasksScreen extends StatefulWidget {
 }
 
 class _TasksScreenState extends State<TasksScreen> {
+  final _taskService = TaskService();
   List<Task> _allTasks = [];
   List<Project> _projects = [];
   bool _loading = true;
@@ -41,60 +38,21 @@ class _TasksScreenState extends State<TasksScreen> {
       _error = null;
     });
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
-
-      String taskEndpoint = '/api/mobile/tasks';
-      if (_projectFilter != 'all') {
-        taskEndpoint += '?project_id=$_projectFilter';
-      }
-
       final futures = <Future>[
-        api.get(taskEndpoint),
+        _taskService.getAll(),
         if (_projects.isEmpty) ProjectService().getAll(),
       ];
-
       final results = await Future.wait(futures);
       if (!mounted) return;
-
-      final taskList = (results[0] as List<dynamic>? ?? [])
-          .map((e) => Task.fromJson(e as Map<String, dynamic>))
-          .toList();
-
+      final taskList = results[0] as List<Task>;
       if (results.length > 1) {
         _projects = results[1] as List<Project>;
       }
-
-      repo.upsertTasks(taskList);
-
       setState(() {
         _allTasks = taskList;
-        _projects = _projects;
         _loading = false;
       });
-    } on ApiOfflineException {
-      await _loadFromLocal();
     } catch (e) {
-      await _loadFromLocal();
-    }
-  }
-
-  Future<void> _loadFromLocal() async {
-    try {
-      final repo = context.read<LocalRepository>();
-      final int? projectId =
-          _projectFilter != 'all' ? int.tryParse(_projectFilter) : null;
-      final taskList = projectId != null
-          ? await repo.getTasksByProjectId(projectId)
-          : await repo.getAllTasks();
-      if (!mounted) return;
-      setState(() {
-        _allTasks = taskList;
-        _projects = _projects;
-        _loading = false;
-        _error = null;
-      });
-    } catch (_) {
       if (mounted) {
         setState(() {
           _error = 'No se pudo cargar la bitácora.';
@@ -104,22 +62,36 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
-  Project? _projectById(int? id) => null;
+  Project? _projectById(String? id) =>
+      id == null ? null : _projects.where((p) => p.id == id).firstOrNull;
 
   List<Task> get _filteredTasks {
     return _allTasks.where((t) {
-      if (_completionFilter == 'pending') return !t.completada;
-      if (_completionFilter == 'done') return t.completada;
-      return true;
+      final matchesCompletion = _completionFilter == 'all'
+          ? true
+          : _completionFilter == 'pending'
+              ? !t.isCompleted
+              : t.isCompleted;
+      final matchesProject = _projectFilter == 'all' || t.projectId == _projectFilter;
+      return matchesCompletion && matchesProject;
     }).toList();
   }
 
   Map<String, List<Task>> get _groupedTasks {
-    final tasks = List<Task>.from(_filteredTasks)
-      ..sort((a, b) => b.fecha.compareTo(a.fecha));
+    final tasks = List<Task>.from(_filteredTasks);
+    // Sort: tasks with dueDate sorted desc, then tasks without dueDate
+    tasks.sort((a, b) {
+      final aDate = a.dueDate ?? '';
+      final bDate = b.dueDate ?? '';
+      if (aDate.isEmpty && bDate.isEmpty) return b.created.compareTo(a.created);
+      if (aDate.isEmpty) return 1;
+      if (bDate.isEmpty) return -1;
+      return bDate.compareTo(aDate);
+    });
     final map = <String, List<Task>>{};
     for (final t in tasks) {
-      map.putIfAbsent(t.fecha, () => []).add(t);
+      final key = t.dueDate ?? t.created.toIso8601String().substring(0, 10);
+      map.putIfAbsent(key, () => []).add(t);
     }
     return map;
   }
@@ -141,36 +113,11 @@ class _TasksScreenState extends State<TasksScreen> {
 
   Future<void> _toggleTask(Task task) async {
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
-      await api.put('/api/mobile/tasks/${task.id}',
-          {'completada': !task.completada});
-      final updated = Task.fromJson({
-        'id': task.id, 'fecha': task.fecha, 'descripcion': task.descripcion,
-        'completada': !task.completada, 'proyecto_id': task.proyectoId,
-        'notas': task.notas,
+      await _taskService.update(task.id, {
+        'status': task.isCompleted ? 'pending' : 'completed',
       });
-      repo.upsertTask(updated);
       await _loadData();
-    } on ApiOfflineException {
-      final repo = context.read<LocalRepository>();
-      final payload = jsonEncode({'completada': !task.completada});
-      await repo.addPendingOp(
-        entityType: 'task', operation: 'update',
-        entityId: task.id, endpoint: '/api/mobile/tasks/${task.id}',
-        payload: payload,
-      );
-      final updated = Task.fromJson({
-        'id': task.id, 'fecha': task.fecha, 'descripcion': task.descripcion,
-        'completada': !task.completada, 'proyecto_id': task.proyectoId,
-        'notas': task.notas,
-      });
-      repo.upsertTask(updated);
-      if (mounted) {
-        SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-        await _loadData();
-      }
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No se pudo actualizar la tarea.')),
@@ -186,7 +133,7 @@ class _TasksScreenState extends State<TasksScreen> {
         title: Text('¿Eliminar tarea?',
             style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
         content: Text(
-          task.descripcion,
+          task.title,
           style: GoogleFonts.inter(fontSize: 13),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
@@ -198,8 +145,8 @@ class _TasksScreenState extends State<TasksScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.colorError),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: AppTheme.colorError),
             child: const Text('Eliminar'),
           ),
         ],
@@ -207,23 +154,9 @@ class _TasksScreenState extends State<TasksScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        final api = context.read<ApiService>();
-        final repo = context.read<LocalRepository>();
-        await api.delete('/api/mobile/tasks/${task.id}');
-        repo.deleteTask(task.id);
-        _loadData();
-      } on ApiOfflineException {
-        final repo = context.read<LocalRepository>();
-        await repo.addPendingOp(
-          entityType: 'task', operation: 'delete',
-          entityId: task.id, endpoint: '/api/mobile/tasks/${task.id}',
-        );
-        repo.deleteTask(task.id);
-        if (mounted) {
-          SyncToast.show(context, 'Eliminado localmente. Se sincronizará al reconectar.');
-          _loadData();
-        }
-      } catch (e) {
+        await _taskService.delete(task.id);
+        await _loadData();
+      } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('No se pudo eliminar la tarea.')),
@@ -311,23 +244,16 @@ class _TasksScreenState extends State<TasksScreen> {
           _FilterChip(
             label: 'Todos',
             selected: _projectFilter == 'all',
-            onTap: () {
-              setState(() => _projectFilter = 'all');
-              _loadData();
-            },
+            onTap: () => setState(() => _projectFilter = 'all'),
           ),
           ..._projects.map((p) {
-            final id = p.id.toString();
             return Padding(
               padding: const EdgeInsets.only(left: 8),
               child: _FilterChip(
                 label: p.name,
-                selected: _projectFilter == id,
+                selected: _projectFilter == p.id,
                 color: p.displayColor,
-                onTap: () {
-                  setState(() => _projectFilter = id);
-                  _loadData();
-                },
+                onTap: () => setState(() => _projectFilter = p.id),
               ),
             );
           }),
@@ -407,9 +333,7 @@ class _TasksScreenState extends State<TasksScreen> {
                 children: tasks
                     .map((t) => _TaskRow(
                           task: t,
-                          project: t.proyectoId != null
-                              ? _projectById(t.proyectoId!)
-                              : null,
+                          project: _projectById(t.projectId),
                           onToggle: () => _toggleTask(t),
                           onEdit: () => _showTaskDialog(editTask: t),
                           onDelete: () => _deleteTask(t),
@@ -463,7 +387,7 @@ class _TasksScreenState extends State<TasksScreen> {
   void _showTaskDialog({Task? editTask}) {
     showDialog(
       context: context,
-      builder: (ctx) => _NewTaskDialog(
+      builder: (ctx) => _TaskDialog(
         projects: _projects,
         editTask: editTask,
         onSaved: () {
@@ -564,7 +488,7 @@ class _TaskRow extends StatelessWidget {
             width: 24,
             height: 24,
             child: Checkbox(
-              value: t.completada,
+              value: t.isCompleted,
               onChanged: (_) => onToggle(),
               activeColor: AppTheme.colorExito,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -578,35 +502,41 @@ class _TaskRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  t.descripcion,
+                  t.title,
                   style: GoogleFonts.inter(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
-                    color: t.completada
+                    color: t.isCompleted
                         ? AppTheme.colorTextoSecundario
                         : AppTheme.colorTexto,
-                    decoration: t.completada
+                    decoration: t.isCompleted
                         ? TextDecoration.lineThrough
                         : null,
                   ),
                 ),
-                if (t.notas != null && t.notas!.isNotEmpty) ...[
+                if (t.notes != null && t.notes!.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
-                    t.notas!,
+                    t.notes!,
                     style: GoogleFonts.inter(
                       fontSize: 11,
                       color: AppTheme.colorTextoSecundario,
                     ),
                   ),
                 ],
-                if (project != null) ...[
-                  const SizedBox(height: 4),
-                  ProjectBadge(
-                    projectName: project!.name,
-                    colorHex: project!.color,
-                  ),
-                ],
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    if (project != null) ...[
+                      ProjectBadge(
+                        projectName: project!.name,
+                        colorHex: project!.color,
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    _PriorityBadge(priority: t.priority),
+                  ],
+                ),
               ],
             ),
           ),
@@ -629,29 +559,69 @@ class _TaskRow extends StatelessWidget {
   }
 }
 
+// ── Badge de prioridad ────────────────────────────────────────────────────────
+
+class _PriorityBadge extends StatelessWidget {
+  final String priority;
+  const _PriorityBadge({required this.priority});
+
+  @override
+  Widget build(BuildContext context) {
+    Color color;
+    String label;
+    switch (priority) {
+      case 'high':
+        color = AppTheme.colorError;
+        label = 'Alta';
+      case 'low':
+        color = AppTheme.colorTextoSecundario;
+        label = 'Baja';
+      default:
+        color = AppTheme.colorAdvertencia;
+        label = 'Media';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withAlpha(25),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 10,
+          fontWeight: FontWeight.w500,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
 // ── Dialog: Nueva / Editar tarea ──────────────────────────────────────────────
 
-class _NewTaskDialog extends StatefulWidget {
+class _TaskDialog extends StatefulWidget {
   final List<Project> projects;
   final VoidCallback onSaved;
   final Task? editTask;
 
-  const _NewTaskDialog({
+  const _TaskDialog({
     required this.projects,
     required this.onSaved,
     this.editTask,
   });
 
   @override
-  State<_NewTaskDialog> createState() => _NewTaskDialogState();
+  State<_TaskDialog> createState() => _TaskDialogState();
 }
 
-class _NewTaskDialogState extends State<_NewTaskDialog> {
+class _TaskDialogState extends State<_TaskDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _descController = TextEditingController();
+  final _titleController = TextEditingController();
   final _notesController = TextEditingController();
-  late DateTime _date;
+  DateTime? _dueDate;
   String? _selectedProjectId;
+  String _priority = 'medium';
   bool _saving = false;
   String? _error;
 
@@ -662,22 +632,21 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
     super.initState();
     final t = widget.editTask;
     if (t != null) {
-      _descController.text = t.descripcion;
-      _notesController.text = t.notas ?? '';
-      _selectedProjectId = t.proyectoId?.toString();
-      try {
-        _date = DateTime.parse(t.fecha);
-      } catch (_) {
-        _date = DateTime.now();
+      _titleController.text = t.title;
+      _notesController.text = t.notes ?? '';
+      _selectedProjectId = t.projectId;
+      _priority = t.priority;
+      if (t.dueDate != null) {
+        try {
+          _dueDate = DateTime.parse(t.dueDate!);
+        } catch (_) {}
       }
-    } else {
-      _date = DateTime.now();
     }
   }
 
   @override
   void dispose() {
-    _descController.dispose();
+    _titleController.dispose();
     _notesController.dispose();
     super.dispose();
   }
@@ -688,11 +657,11 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: _date,
+      initialDate: _dueDate ?? DateTime.now(),
       firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
+      lastDate: DateTime(2035),
     );
-    if (picked != null && mounted) setState(() => _date = picked);
+    if (picked != null && mounted) setState(() => _dueDate = picked);
   }
 
   Future<void> _save() async {
@@ -701,56 +670,23 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
       _saving = true;
       _error = null;
     });
+    final body = <String, dynamic>{
+      'title': _titleController.text.trim(),
+      if (_selectedProjectId != null) 'projectId': _selectedProjectId,
+      'priority': _priority,
+      if (_dueDate != null) 'dueDate': _dueDate!.toIso8601String().substring(0, 10),
+      if (_notesController.text.trim().isNotEmpty)
+        'notes': _notesController.text.trim(),
+    };
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
-      final body = <String, dynamic>{
-        'descripcion': _descController.text.trim(),
-        'fecha': _date.toIso8601String().substring(0, 10),
-        if (_selectedProjectId != null) 'proyecto_id': _selectedProjectId,
-        if (_notesController.text.isNotEmpty)
-          'notas': _notesController.text.trim(),
-      };
+      final service = TaskService();
       if (_isEditing) {
-        await api.put('/api/mobile/tasks/${widget.editTask!.id}', body);
-        repo.upsertTask(Task.fromJson({...body, 'id': widget.editTask!.id}));
+        await service.update(widget.editTask!.id, body);
       } else {
-        final result = await api.post('/api/mobile/tasks', body);
-        if (result != null) {
-          repo.upsertTask(Task.fromJson(result as Map<String, dynamic>));
-        }
+        body['status'] = 'pending';
+        await service.create(body);
       }
       if (mounted) widget.onSaved();
-    } on ApiOfflineException {
-      final repo = context.read<LocalRepository>();
-      final body = <String, dynamic>{
-        'descripcion': _descController.text.trim(),
-        'fecha': _date.toIso8601String().substring(0, 10),
-        if (_selectedProjectId != null) 'proyecto_id': _selectedProjectId,
-        if (_notesController.text.isNotEmpty)
-          'notas': _notesController.text.trim(),
-      };
-      if (_isEditing) {
-        await repo.addPendingOp(
-          entityType: 'task', operation: 'update',
-          entityId: widget.editTask!.id,
-          endpoint: '/api/mobile/tasks/${widget.editTask!.id}',
-          payload: jsonEncode(body),
-        );
-        repo.upsertTask(Task.fromJson({...body, 'id': widget.editTask!.id}));
-      } else {
-        final tempId = -DateTime.now().millisecondsSinceEpoch;
-        await repo.addPendingOp(
-          entityType: 'task', operation: 'create',
-          tempId: tempId, endpoint: '/api/mobile/tasks',
-          payload: jsonEncode(body),
-        );
-        repo.upsertTask(Task.fromJson({...body, 'id': tempId}));
-      }
-      if (mounted) {
-        SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-        widget.onSaved();
-      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -774,52 +710,75 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
         width: 380,
         child: Form(
           key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: _descController,
-                decoration: const InputDecoration(labelText: 'Descripción *'),
-                maxLines: 2,
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Requerido' : null,
-              ),
-              const SizedBox(height: 10),
-              InkWell(
-                onTap: _pickDate,
-                child: InputDecorator(
-                  decoration: const InputDecoration(labelText: 'Fecha'),
-                  child: Text(_formatDisplay(_date),
-                      style: GoogleFonts.inter(fontSize: 14)),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _titleController,
+                  decoration: const InputDecoration(labelText: 'Título *'),
+                  maxLines: 2,
+                  validator: (v) =>
+                      v == null || v.trim().isEmpty ? 'Requerido' : null,
                 ),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String?>(
-                value: _selectedProjectId,
-                items: [
-                  const DropdownMenuItem<String?>(
-                      value: null, child: Text('Ninguno')),
-                  ...widget.projects.map((p) =>
-                      DropdownMenuItem<String?>(value: p.id, child: Text(p.name))),
-                ],
-                onChanged: (v) => setState(() => _selectedProjectId = v),
-                decoration:
-                    const InputDecoration(labelText: 'Proyecto (opcional)'),
-              ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _notesController,
-                decoration:
-                    const InputDecoration(labelText: 'Notas (opcional)'),
-                maxLines: 2,
-              ),
-              if (_error != null) ...[
                 const SizedBox(height: 10),
-                Text(_error!,
-                    style: GoogleFonts.inter(
-                        color: AppTheme.colorError, fontSize: 13)),
+                InkWell(
+                  onTap: _pickDate,
+                  child: InputDecorator(
+                    decoration: const InputDecoration(labelText: 'Fecha límite (opcional)'),
+                    child: Text(
+                      _dueDate != null ? _formatDisplay(_dueDate!) : 'Sin fecha',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: _dueDate != null
+                            ? AppTheme.colorTexto
+                            : AppTheme.colorTextoSecundario,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String?>(
+                  value: _selectedProjectId,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('Ninguno')),
+                    ...widget.projects.map((p) =>
+                        DropdownMenuItem<String?>(
+                            value: p.id, child: Text(p.name))),
+                  ],
+                  onChanged: (v) => setState(() => _selectedProjectId = v),
+                  decoration:
+                      const InputDecoration(labelText: 'Proyecto (opcional)'),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: _priority,
+                  items: const [
+                    DropdownMenuItem(value: 'low', child: Text('Baja')),
+                    DropdownMenuItem(value: 'medium', child: Text('Media')),
+                    DropdownMenuItem(value: 'high', child: Text('Alta')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setState(() => _priority = v);
+                  },
+                  decoration: const InputDecoration(labelText: 'Prioridad'),
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: _notesController,
+                  decoration:
+                      const InputDecoration(labelText: 'Notas (opcional)'),
+                  maxLines: 2,
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(_error!,
+                      style: GoogleFonts.inter(
+                          color: AppTheme.colorError, fontSize: 13)),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
