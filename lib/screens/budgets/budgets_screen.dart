@@ -3,9 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert';
 import '../../services/api_service.dart';
+import '../../services/category_service.dart';
 import '../../database/local_repository.dart';
 import '../../widgets/sync_toast.dart';
 import '../../models/budget.dart';
+import '../../models/category_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
@@ -19,7 +21,7 @@ class BudgetsScreen extends StatefulWidget {
 
 class _BudgetsScreenState extends State<BudgetsScreen> {
   List<Budget> _budgets = [];
-  List<Map<String, dynamic>> _categories = [];
+  List<Category> _categories = [];
   bool _loading = true;
   String? _error;
 
@@ -48,30 +50,28 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     try {
       final api = context.read<ApiService>();
       final repo = context.read<LocalRepository>();
-      final results = await Future.wait([
-        api.get('/api/mobile/budgets/status?month=$_month&year=$_year'),
-        if (_categories.isEmpty) api.get('/api/mobile/categories'),
-      ]);
+
+      // Categorías desde PocketBase (solo si no están cargadas)
+      if (_categories.isEmpty) {
+        try {
+          _categories = await CategoryService().getAll();
+        } catch (_) {
+          // Continuar aunque fallen las categorías
+        }
+      }
+
+      final budgetData = await api.get('/api/mobile/budgets/status?month=$_month&year=$_year');
       if (!mounted) return;
 
-      final budgetList = (results[0] as List<dynamic>? ?? [])
+      final budgetList = (budgetData as List<dynamic>? ?? [])
           .map((e) => Budget.fromJson(e as Map<String, dynamic>))
           .toList();
-
-      List<Map<String, dynamic>> cats = _categories;
-      if (results.length > 1) {
-        cats = (results[1] as List<dynamic>? ?? [])
-            .map((e) => e as Map<String, dynamic>)
-            .toList();
-        repo.upsertCategories(cats);
-      }
 
       await repo.clearBudgets();
       repo.upsertBudgets(budgetList);
 
       setState(() {
         _budgets = budgetList;
-        _categories = cats;
         _loading = false;
       });
     } on ApiOfflineException {
@@ -85,12 +85,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     try {
       final repo = context.read<LocalRepository>();
       final budgetList = await repo.getBudgets();
-      final cats =
-          _categories.isEmpty ? await repo.getCategories() : _categories;
       if (!mounted) return;
       setState(() {
         _budgets = budgetList;
-        _categories = cats;
         _loading = false;
         _error = null;
       });
@@ -628,7 +625,7 @@ class _BudgetCard extends StatelessWidget {
 // ── Dialog: Nuevo / Editar presupuesto ────────────────────────────────────────
 
 class _NewBudgetDialog extends StatefulWidget {
-  final List<Map<String, dynamic>> categories;
+  final List<Category> categories;
   final int month;
   final int year;
   final VoidCallback onSaved;
@@ -649,7 +646,7 @@ class _NewBudgetDialog extends StatefulWidget {
 class _NewBudgetDialogState extends State<_NewBudgetDialog> {
   final _formKey = GlobalKey<FormState>();
   final _limitController = TextEditingController();
-  int? _selectedCategoryId;
+  String? _selectedCategoryId;
   late int _month;
   late int _year;
   bool _saving = false;
@@ -670,7 +667,6 @@ class _NewBudgetDialogState extends State<_NewBudgetDialog> {
     final b = widget.editBudget;
     if (b != null) {
       _limitController.text = b.limit.toStringAsFixed(0);
-      _selectedCategoryId = b.categoryId;
     }
   }
 
@@ -756,15 +752,15 @@ class _NewBudgetDialogState extends State<_NewBudgetDialog> {
             children: [
               // Categoría (solo en creación)
               if (!_isEditing)
-                DropdownButtonFormField<int?>(
+                DropdownButtonFormField<String?>(
                   initialValue: _selectedCategoryId,
                   items: [
-                    const DropdownMenuItem<int?>(
+                    const DropdownMenuItem<String?>(
                         value: null,
                         child: Text('— Selecciona una categoría —')),
-                    ...widget.categories.map((c) => DropdownMenuItem<int?>(
-                          value: c['id'] as int?,
-                          child: Text(c['name'] as String? ?? ''),
+                    ...widget.categories.map((c) => DropdownMenuItem<String?>(
+                          value: c.id,
+                          child: Text(c.name),
                         )),
                   ],
                   onChanged: (v) => setState(() => _selectedCategoryId = v),

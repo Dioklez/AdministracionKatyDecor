@@ -199,15 +199,6 @@ class Budgets extends Table {
   Set<Column> get primaryKey => {budgetId};
 }
 
-// ── Categorías ─────────────────────────────────────────────────────────────
-class Categories extends Table {
-  IntColumn get id => integer()();
-  TextColumn get name => text()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
 // ── Cola de operaciones pendientes ─────────────────────────────────────────
 class PendingOps extends Table {
   IntColumn get id => integer().autoIncrement()();
@@ -245,7 +236,6 @@ class CacheEntries extends Table {
   InventoryItems,
   InventoryMovements,
   Budgets,
-  Categories,
   PendingOps,
   CacheEntries,
 ])

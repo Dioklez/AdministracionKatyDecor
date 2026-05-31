@@ -689,29 +689,6 @@ class LocalRepository {
       );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // CATEGORÍAS
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<Map<String, dynamic>>> getCategories() async {
-    final rows = await _db.select(_db.categories).get();
-    return rows.map((r) => {'id': r.id, 'name': r.name}).toList();
-  }
-
-  Future<void> upsertCategories(List<Map<String, dynamic>> cats) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-        _db.categories,
-        cats
-            .map((c) => CategoriesCompanion(
-                  id: Value((c['id'] as num).toInt()),
-                  name: Value(c['name'] as String? ?? c['nombre'] as String? ?? ''),
-                ))
-            .toList(),
-      );
-    });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
   // COLA DE OPERACIONES PENDIENTES
   // ═══════════════════════════════════════════════════════════════════════
 

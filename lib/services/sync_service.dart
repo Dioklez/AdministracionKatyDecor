@@ -163,7 +163,6 @@ class SyncService {
       _safePull('accounts', errors, _pullAccounts),
       _safePull('inventory', errors, _pullInventory),
       _safePull('budgets', errors, () => _pullBudgets(now.month, now.year, skipClear: skipClear)),
-      _safePull('categories', errors, _pullCategories),
       _safePull('chart', errors, _pullChartData),
     ];
 
@@ -249,12 +248,6 @@ class SyncService {
         .toList();
     if (!skipClear) await _repo.clearBudgets();
     await _repo.upsertBudgets(list);
-  }
-
-  Future<void> _pullCategories() async {
-    final data = await _api.get('/api/mobile/categories');
-    final list = (data as List).cast<Map<String, dynamic>>();
-    await _repo.upsertCategories(list);
   }
 
   Future<void> _pullChartData() async {
