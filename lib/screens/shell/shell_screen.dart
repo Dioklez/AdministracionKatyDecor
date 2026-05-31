@@ -16,6 +16,7 @@ import '../accounts/accounts_screen.dart';
 import '../budgets/budgets_screen.dart';
 import '../placeholder/placeholder_screen.dart';
 import 'sidebar_widget.dart';
+import '../../services/update_service.dart';
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
@@ -46,6 +47,11 @@ class _ShellScreenState extends State<ShellScreen> {
       const Duration(seconds: 30),
       (_) => _checkConnectivity(),
     );
+
+    // Verificar actualizaciones sin interferir con la carga inicial
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) UpdateService.checkForUpdates(context);
+    });
   }
 
   @override
