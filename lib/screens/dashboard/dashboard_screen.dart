@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:convert';
 import '../../services/api_service.dart';
+import '../../services/project_service.dart';
+import '../../models/project_model.dart';
 import '../../database/local_repository.dart';
 import '../../models/transaction.dart';
 import '../../models/chart_data.dart';
@@ -103,7 +105,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final from = _dateFrom?.toIso8601String().substring(0, 10);
       final to = _dateTo?.toIso8601String().substring(0, 10);
       final txnList = await repo.getTransactionsByDateRange(from, to);
-      final activeProjects = await repo.getProjectsByStatus('active');
+      final allProjects = await ProjectService().getAll().catchError((_) => <Project>[]);
+      final activeProjects = allProjects.where((p) => p.status == 'active').toList();
       final cachedChart = await repo.getCacheEntry('graficas/ingreso-egreso');
       List<MonthlyChartData> chartData = [];
       if (cachedChart != null) {

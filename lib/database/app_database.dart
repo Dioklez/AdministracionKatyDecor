@@ -6,24 +6,6 @@ import 'package:path/path.dart' as p;
 
 part 'app_database.g.dart';
 
-// ── Proyectos ──────────────────────────────────────────────────────────────
-@DataClassName('ProjectRow')
-class Projects extends Table {
-  IntColumn get id => integer()();
-  TextColumn get name => text()();
-  TextColumn get clientName => text()();
-  TextColumn get status => text().withDefault(const Constant('active'))();
-  TextColumn get color => text().nullable()();
-  TextColumn get description => text().nullable()();
-  TextColumn get createdAt => text()();
-  RealColumn get quoted => real().nullable()();
-  RealColumn get spent => real().nullable()();
-  RealColumn get pl => real().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
 // ── Transacciones ──────────────────────────────────────────────────────────
 @DataClassName('TransactionRow')
 class Transactions extends Table {
@@ -161,7 +143,6 @@ class CacheEntries extends Table {
 
 // ── Base de datos ──────────────────────────────────────────────────────────
 @DriftDatabase(tables: [
-  Projects,
   Transactions,
   Quotes,
   Tasks,

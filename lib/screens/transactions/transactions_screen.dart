@@ -3,10 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert';
 import '../../services/api_service.dart';
+import '../../services/project_service.dart';
 import '../../database/local_repository.dart';
 import '../../widgets/sync_toast.dart';
 import '../../models/transaction.dart';
-import '../../models/project.dart';
+import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
@@ -43,31 +44,21 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       final api = context.read<ApiService>();
       final repo = context.read<LocalRepository>();
 
-      if (_projects.isEmpty) {
-        final results = await Future.wait([
-          _fetchTransactions(api),
-          api.get('/api/mobile/projects'),
-        ]);
-        if (!mounted) return;
-        final projectList = (results[1] as List<dynamic>? ?? [])
-            .map((e) => Project.fromJson(e as Map<String, dynamic>))
-            .toList();
-        repo.upsertProjects(projectList);
-        repo.upsertTransactions(results[0] as List<Transaction>);
-        setState(() {
-          _transactions = results[0] as List<Transaction>;
-          _projects = projectList;
-          _loading = false;
-        });
-      } else {
-        final txns = await _fetchTransactions(api);
-        if (!mounted) return;
-        repo.upsertTransactions(txns);
-        setState(() {
-          _transactions = txns;
-          _loading = false;
-        });
+      final futures = <Future>[
+        _fetchTransactions(api),
+        if (_projects.isEmpty) ProjectService().getAll(),
+      ];
+      final results = await Future.wait(futures);
+      if (!mounted) return;
+      final txns = results[0] as List<Transaction>;
+      if (results.length > 1) {
+        _projects = results[1] as List<Project>;
       }
+      repo.upsertTransactions(txns);
+      setState(() {
+        _transactions = txns;
+        _loading = false;
+      });
     } on ApiOfflineException {
       await _loadFromLocal();
     } catch (e) {
@@ -89,12 +80,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       } else {
         txns = await repo.getAllTransactions();
       }
-      final projects =
-          _projects.isEmpty ? await repo.getAllProjects() : _projects;
       if (!mounted) return;
       setState(() {
         _transactions = txns;
-        _projects = projects;
+        _projects = _projects;
         _loading = false;
         _error = null;
       });
@@ -505,7 +494,7 @@ class _AddTransactionDialogState extends State<_AddTransactionDialog> {
   String _currency = 'MXN';
   final _exchangeController = TextEditingController(text: '1');
   final _notesController = TextEditingController();
-  int? _selectedProjectId;
+  String? _selectedProjectId;
   DateTime _date = DateTime.now();
   bool _saving = false;
   String? _error;
@@ -683,12 +672,12 @@ class _AddTransactionDialogState extends State<_AddTransactionDialog> {
                 const SizedBox(height: 12),
 
                 // Proyecto
-                DropdownButtonFormField<int?>(
-                  initialValue: _selectedProjectId,
+                DropdownButtonFormField<String?>(
+                  value: _selectedProjectId,
                   items: [
-                    const DropdownMenuItem<int?>(
+                    const DropdownMenuItem<String?>(
                         value: null, child: Text('Ninguno — General')),
-                    ...widget.projects.map((p) => DropdownMenuItem<int?>(
+                    ...widget.projects.map((p) => DropdownMenuItem<String?>(
                           value: p.id,
                           child: Text(p.name),
                         )),

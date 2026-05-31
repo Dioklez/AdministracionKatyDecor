@@ -1,5 +1,4 @@
 import 'package:drift/drift.dart';
-import '../models/project.dart';
 import '../models/transaction.dart';
 import '../models/quote.dart';
 import '../models/task.dart';
@@ -11,74 +10,6 @@ import 'app_database.dart';
 class LocalRepository {
   final AppDatabase _db;
   LocalRepository(this._db);
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // PROYECTOS
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<Project>> getAllProjects() async {
-    final rows = await _db.select(_db.projects).get();
-    return rows.map(_projectFromRow).toList();
-  }
-
-  Future<List<Project>> getProjectsByStatus(String status) async {
-    final rows = await (_db.select(_db.projects)
-          ..where((t) => t.status.equals(status)))
-        .get();
-    return rows.map(_projectFromRow).toList();
-  }
-
-  Future<Project?> getProjectById(int id) async {
-    final row = await (_db.select(_db.projects)
-          ..where((t) => t.id.equals(id)))
-        .getSingleOrNull();
-    return row != null ? _projectFromRow(row) : null;
-  }
-
-  Future<void> upsertProject(Project p) async {
-    await _db.into(_db.projects).insertOnConflictUpdate(_projectToCompanion(p));
-  }
-
-  Future<void> upsertProjects(List<Project> projects) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-          _db.projects, projects.map(_projectToCompanion).toList());
-    });
-  }
-
-  Future<void> deleteProject(int id) async {
-    await (_db.delete(_db.projects)..where((t) => t.id.equals(id))).go();
-  }
-
-  Future<void> clearProjects() async {
-    await _db.delete(_db.projects).go();
-  }
-
-  Project _projectFromRow(ProjectRow row) => Project.fromJson({
-        'id': row.id,
-        'name': row.name,
-        'client_name': row.clientName,
-        'status': row.status,
-        'color': row.color,
-        'description': row.description,
-        'created_at': row.createdAt,
-        'quoted': row.quoted,
-        'spent': row.spent,
-        'pl': row.pl,
-      });
-
-  ProjectsCompanion _projectToCompanion(Project p) => ProjectsCompanion(
-        id: Value(p.id),
-        name: Value(p.name),
-        clientName: Value(p.clientName),
-        status: Value(p.status),
-        color: Value(p.color),
-        description: Value(p.description),
-        createdAt: Value(p.createdAt),
-        quoted: Value(p.quoted),
-        spent: Value(p.spent),
-        pl: Value(p.pl),
-      );
 
   // ═══════════════════════════════════════════════════════════════════════
   // TRANSACCIONES
@@ -512,18 +443,6 @@ class LocalRepository {
   Future<void> updateLocalId(
       String entityType, int tempId, int realId) async {
     switch (entityType) {
-      case 'project':
-        await _db.customStatement(
-            'UPDATE projects SET id = ? WHERE id = ?', [realId, tempId]);
-        await _db.customStatement(
-            'UPDATE quotes SET project_id = ? WHERE project_id = ?',
-            [realId, tempId]);
-        await _db.customStatement(
-            'UPDATE tasks SET proyecto_id = ? WHERE proyecto_id = ?',
-            [realId, tempId]);
-        await _db.customStatement(
-            'UPDATE transactions SET scope_id = ? WHERE scope_id = ? AND scope_type = ?',
-            [realId, tempId, 'project']);
       case 'quote':
         await _db.customStatement(
             'UPDATE quotes SET id = ? WHERE id = ?', [realId, tempId]);

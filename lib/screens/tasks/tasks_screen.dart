@@ -3,10 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert';
 import '../../services/api_service.dart';
+import '../../services/project_service.dart';
 import '../../database/local_repository.dart';
 import '../../widgets/sync_toast.dart';
 import '../../models/task.dart';
-import '../../models/project.dart';
+import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
@@ -48,9 +49,9 @@ class _TasksScreenState extends State<TasksScreen> {
         taskEndpoint += '?project_id=$_projectFilter';
       }
 
-      final futures = [
+      final futures = <Future>[
         api.get(taskEndpoint),
-        if (_projects.isEmpty) api.get('/api/mobile/projects'),
+        if (_projects.isEmpty) ProjectService().getAll(),
       ];
 
       final results = await Future.wait(futures);
@@ -60,19 +61,15 @@ class _TasksScreenState extends State<TasksScreen> {
           .map((e) => Task.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      List<Project> projects = _projects;
       if (results.length > 1) {
-        projects = (results[1] as List<dynamic>? ?? [])
-            .map((e) => Project.fromJson(e as Map<String, dynamic>))
-            .toList();
-        repo.upsertProjects(projects);
+        _projects = results[1] as List<Project>;
       }
 
       repo.upsertTasks(taskList);
 
       setState(() {
         _allTasks = taskList;
-        _projects = projects;
+        _projects = _projects;
         _loading = false;
       });
     } on ApiOfflineException {
@@ -90,12 +87,10 @@ class _TasksScreenState extends State<TasksScreen> {
       final taskList = projectId != null
           ? await repo.getTasksByProjectId(projectId)
           : await repo.getAllTasks();
-      final projects =
-          _projects.isEmpty ? await repo.getAllProjects() : _projects;
       if (!mounted) return;
       setState(() {
         _allTasks = taskList;
-        _projects = projects;
+        _projects = _projects;
         _loading = false;
         _error = null;
       });
@@ -109,8 +104,7 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
-  Project? _projectById(int id) =>
-      _projects.where((p) => p.id == id).firstOrNull;
+  Project? _projectById(int? id) => null;
 
   List<Task> get _filteredTasks {
     return _allTasks.where((t) {
@@ -657,7 +651,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
   final _descController = TextEditingController();
   final _notesController = TextEditingController();
   late DateTime _date;
-  int? _selectedProjectId;
+  String? _selectedProjectId;
   bool _saving = false;
   String? _error;
 
@@ -670,7 +664,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
     if (t != null) {
       _descController.text = t.descripcion;
       _notesController.text = t.notas ?? '';
-      _selectedProjectId = t.proyectoId;
+      _selectedProjectId = t.proyectoId?.toString();
       try {
         _date = DateTime.parse(t.fecha);
       } catch (_) {
@@ -800,13 +794,13 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                 ),
               ),
               const SizedBox(height: 10),
-              DropdownButtonFormField<int?>(
-                initialValue: _selectedProjectId,
+              DropdownButtonFormField<String?>(
+                value: _selectedProjectId,
                 items: [
-                  const DropdownMenuItem<int?>(
+                  const DropdownMenuItem<String?>(
                       value: null, child: Text('Ninguno')),
                   ...widget.projects.map((p) =>
-                      DropdownMenuItem<int?>(value: p.id, child: Text(p.name))),
+                      DropdownMenuItem<String?>(value: p.id, child: Text(p.name))),
                 ],
                 onChanged: (v) => setState(() => _selectedProjectId = v),
                 decoration:

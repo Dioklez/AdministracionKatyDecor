@@ -1,12 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
-import '../../database/local_repository.dart';
-import '../../widgets/sync_toast.dart';
-import '../../models/project.dart';
-import '../../models/transaction.dart';
+import '../../services/project_service.dart';
+import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
@@ -20,8 +15,8 @@ class ProjectsScreen extends StatefulWidget {
 }
 
 class _ProjectsScreenState extends State<ProjectsScreen> {
+  final _service = ProjectService();
   List<Project> _projects = [];
-  Map<int, _ProjectFinancials> _financials = {};
   bool _loading = true;
   String? _error;
   String _statusFilter = 'all';
@@ -38,70 +33,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       _error = null;
     });
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
-      final results = await Future.wait([
-        api.get('/api/mobile/projects'),
-        api.get('/api/mobile/transactions'),
-      ]);
-
+      final projects = await _service.getAll();
       if (!mounted) return;
-
-      final allProjects = (results[0] as List<dynamic>? ?? [])
-          .map((e) => Project.fromJson(e as Map<String, dynamic>))
-          .toList();
-
-      final allTransactions = (results[1] as List<dynamic>? ?? [])
-          .map((e) => Transaction.fromJson(e as Map<String, dynamic>))
-          .toList();
-
-      repo.upsertProjects(allProjects);
-      repo.upsertTransactions(allTransactions);
-
-      final financials = _computeFinancials(allTransactions);
-
       setState(() {
-        _projects = allProjects;
-        _financials = financials;
+        _projects = projects;
         _loading = false;
       });
-    } on ApiOfflineException {
-      await _loadFromLocal();
     } catch (e) {
-      await _loadFromLocal();
-    }
-  }
-
-  Map<int, _ProjectFinancials> _computeFinancials(
-      List<Transaction> transactions) {
-    final financials = <int, _ProjectFinancials>{};
-    for (final t in transactions) {
-      if (t.isProjectScoped && t.scopeId != null) {
-        final f =
-            financials.putIfAbsent(t.scopeId!, () => _ProjectFinancials());
-        if (t.isIncome) {
-          f.income += t.amountMxn;
-        } else {
-          f.expense += t.amountMxn;
-        }
-      }
-    }
-    return financials;
-  }
-
-  Future<void> _loadFromLocal() async {
-    try {
-      final repo = context.read<LocalRepository>();
-      final allProjects = await repo.getAllProjects();
-      final allTransactions = await repo.getAllTransactions();
-      if (!mounted) return;
-      setState(() {
-        _projects = allProjects;
-        _financials = _computeFinancials(allTransactions);
-        _loading = false;
-        _error = null;
-      });
-    } catch (_) {
       if (mounted) {
         setState(() {
           _error = 'No se pudo cargar los proyectos.';
@@ -145,7 +83,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     DropdownMenuItem(value: 'all', child: Text('Todos')),
                     DropdownMenuItem(value: 'active', child: Text('Activos')),
                     DropdownMenuItem(value: 'paused', child: Text('Pausados')),
-                    DropdownMenuItem(value: 'completed', child: Text('Completados')),
+                    DropdownMenuItem(
+                        value: 'completed', child: Text('Completados')),
                   ],
                   onChanged: (v) {
                     if (v != null) setState(() => _statusFilter = v);
@@ -210,11 +149,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         itemCount: projects.length,
         itemBuilder: (context, index) {
           final p = projects[index];
-          final f = _financials[p.id] ?? _ProjectFinancials();
           return _ProjectCard(
             project: p,
-            financials: f,
-            onTap: () => _openProjectDetail(p.id),
+            onTap: () => _openProjectDetail(p),
             onEdit: () => _showProjectDialog(editProject: p),
             onDelete: () => _confirmDelete(p),
           );
@@ -254,10 +191,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
   }
 
-  void _openProjectDetail(int projectId) {
+  void _openProjectDetail(Project project) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ProjectDetailScreen(projectId: projectId),
+        builder: (_) => ProjectDetailScreen(project: project),
       ),
     );
   }
@@ -265,7 +202,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   void _showProjectDialog({Project? editProject}) {
     showDialog(
       context: context,
-      builder: (ctx) => _NewProjectDialog(
+      builder: (ctx) => _ProjectDialog(
         editProject: editProject,
         onSaved: () {
           Navigator.of(ctx).pop();
@@ -290,8 +227,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.colorError),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: AppTheme.colorError),
             child: const Text('Eliminar'),
           ),
         ],
@@ -299,26 +236,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        final api = context.read<ApiService>();
-        final repo = context.read<LocalRepository>();
-        await api.delete('/api/mobile/projects/${p.id}');
-        repo.deleteProject(p.id);
+        await _service.delete(p.id);
         _loadData();
-      } on ApiOfflineException {
-        final repo = context.read<LocalRepository>();
-        await repo.addPendingOp(
-          entityType: 'project', operation: 'delete',
-          entityId: p.id, endpoint: '/api/mobile/projects/${p.id}',
-        );
-        repo.deleteProject(p.id);
-        if (mounted) {
-          SyncToast.show(context, 'Eliminado localmente. Se sincronizará al reconectar.');
-          _loadData();
-        }
-      } catch (e) {
+      } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No se pudo eliminar el proyecto.')),
+            const SnackBar(
+                content: Text('No se pudo eliminar el proyecto.')),
           );
         }
       }
@@ -326,26 +250,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 }
 
-// ── Financieros por proyecto ──────────────────────────────────────────────────
-
-class _ProjectFinancials {
-  double income = 0;
-  double expense = 0;
-  double get balance => income - expense;
-}
-
 // ── Card de proyecto ──────────────────────────────────────────────────────────
 
 class _ProjectCard extends StatefulWidget {
   final Project project;
-  final _ProjectFinancials financials;
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _ProjectCard({
     required this.project,
-    required this.financials,
     required this.onTap,
     required this.onEdit,
     required this.onDelete,
@@ -389,7 +303,6 @@ class _ProjectCardState extends State<_ProjectCard> {
   @override
   Widget build(BuildContext context) {
     final p = widget.project;
-    final f = widget.financials;
     final projectColor = p.displayColor;
 
     return MouseRegion(
@@ -445,7 +358,8 @@ class _ProjectCardState extends State<_ProjectCard> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: _statusColor(p.status).withAlpha(25),
+                              color:
+                                  _statusColor(p.status).withAlpha(25),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
@@ -466,8 +380,10 @@ class _ProjectCardState extends State<_ProjectCard> {
                               if (v == 'delete') widget.onDelete();
                             },
                             itemBuilder: (_) => const [
-                              PopupMenuItem(value: 'edit', child: Text('Editar')),
-                              PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+                              PopupMenuItem(
+                                  value: 'edit', child: Text('Editar')),
+                              PopupMenuItem(
+                                  value: 'delete', child: Text('Eliminar')),
                             ],
                           ),
                         ],
@@ -491,20 +407,20 @@ class _ProjectCardState extends State<_ProjectCard> {
                         children: [
                           _MiniStat(
                             label: 'Ingresos',
-                            value: _formatMxn(f.income),
+                            value: _formatMxn(p.totalIncome),
                             color: AppTheme.colorExito,
                           ),
                           const SizedBox(width: 16),
                           _MiniStat(
                             label: 'Egresos',
-                            value: _formatMxn(f.expense),
+                            value: _formatMxn(p.totalExpense),
                             color: AppTheme.colorError,
                           ),
                           const SizedBox(width: 16),
                           _MiniStat(
                             label: 'Balance',
-                            value: _formatMxn(f.balance),
-                            color: f.balance >= 0
+                            value: _formatMxn(p.balance),
+                            color: p.balance >= 0
                                 ? AppTheme.colorExito
                                 : AppTheme.colorError,
                           ),
@@ -557,21 +473,23 @@ class _MiniStat extends StatelessWidget {
 
 // ── Dialog: Nuevo / Editar proyecto ──────────────────────────────────────────
 
-class _NewProjectDialog extends StatefulWidget {
+class _ProjectDialog extends StatefulWidget {
   final VoidCallback onSaved;
   final Project? editProject;
 
-  const _NewProjectDialog({required this.onSaved, this.editProject});
+  const _ProjectDialog({required this.onSaved, this.editProject});
 
   @override
-  State<_NewProjectDialog> createState() => _NewProjectDialogState();
+  State<_ProjectDialog> createState() => _ProjectDialogState();
 }
 
-class _NewProjectDialogState extends State<_NewProjectDialog> {
+class _ProjectDialogState extends State<_ProjectDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _clientController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _descController = TextEditingController();
+  final _notesController = TextEditingController();
   String _status = 'active';
   String _color = '#C9A96E';
   bool _saving = false;
@@ -597,7 +515,9 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
     if (p != null) {
       _nameController.text = p.name;
       _clientController.text = p.clientName;
+      _phoneController.text = p.clientPhone ?? '';
       _descController.text = p.description ?? '';
+      _notesController.text = p.notes ?? '';
       _status = p.status;
       _color = p.color ?? '#C9A96E';
     }
@@ -607,7 +527,9 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
   void dispose() {
     _nameController.dispose();
     _clientController.dispose();
+    _phoneController.dispose();
     _descController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
@@ -619,62 +541,24 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
     });
     final body = <String, dynamic>{
       'name': _nameController.text.trim(),
-      'client_name': _clientController.text.trim(),
-      'description': _descController.text.trim().isEmpty
-          ? null
-          : _descController.text.trim(),
+      'clientName': _clientController.text.trim(),
+      if (_phoneController.text.trim().isNotEmpty)
+        'clientPhone': _phoneController.text.trim(),
+      if (_descController.text.trim().isNotEmpty)
+        'description': _descController.text.trim(),
+      if (_notesController.text.trim().isNotEmpty)
+        'notes': _notesController.text.trim(),
       'status': _status,
       'color': _color,
     };
     try {
-      final api = context.read<ApiService>();
-      final repo = context.read<LocalRepository>();
+      final service = ProjectService();
       if (_isEditing) {
-        await api.put('/api/mobile/projects/${widget.editProject!.id}', body);
-        repo.upsertProject(Project.fromJson({
-          ...body,
-          'id': widget.editProject!.id,
-          'created_at': widget.editProject!.createdAt,
-        }));
+        await service.update(widget.editProject!.id, body);
       } else {
-        final result = await api.post('/api/mobile/projects', body);
-        if (result != null) {
-          repo.upsertProject(
-              Project.fromJson(result as Map<String, dynamic>));
-        }
+        await service.create(body);
       }
       if (mounted) widget.onSaved();
-    } on ApiOfflineException {
-      final repo = context.read<LocalRepository>();
-      if (_isEditing) {
-        await repo.addPendingOp(
-          entityType: 'project', operation: 'update',
-          entityId: widget.editProject!.id,
-          endpoint: '/api/mobile/projects/${widget.editProject!.id}',
-          payload: jsonEncode(body),
-        );
-        repo.upsertProject(Project.fromJson({
-          ...body,
-          'id': widget.editProject!.id,
-          'created_at': widget.editProject!.createdAt,
-        }));
-      } else {
-        final tempId = -DateTime.now().millisecondsSinceEpoch;
-        await repo.addPendingOp(
-          entityType: 'project', operation: 'create',
-          tempId: tempId, endpoint: '/api/mobile/projects',
-          payload: jsonEncode(body),
-        );
-        repo.upsertProject(Project.fromJson({
-          ...body,
-          'id': tempId,
-          'created_at': DateTime.now().toIso8601String(),
-        }));
-      }
-      if (mounted) {
-        SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-        widget.onSaved();
-      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -704,7 +588,8 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
               children: [
                 TextFormField(
                   controller: _nameController,
-                  decoration: const InputDecoration(labelText: 'Nombre del proyecto'),
+                  decoration:
+                      const InputDecoration(labelText: 'Nombre del proyecto'),
                   validator: (v) =>
                       v == null || v.trim().isEmpty ? 'Requerido' : null,
                 ),
@@ -717,14 +602,27 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
+                  controller: _phoneController,
+                  decoration:
+                      const InputDecoration(labelText: 'Teléfono (opcional)'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
                   controller: _descController,
                   maxLines: 2,
+                  decoration: const InputDecoration(
+                      labelText: 'Descripción (opcional)'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _notesController,
+                  maxLines: 2,
                   decoration:
-                      const InputDecoration(labelText: 'Descripción (opcional)'),
+                      const InputDecoration(labelText: 'Notas (opcional)'),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  initialValue: _status,
+                  value: _status,
                   items: const [
                     DropdownMenuItem(value: 'active', child: Text('Activo')),
                     DropdownMenuItem(value: 'paused', child: Text('Pausado')),
@@ -754,7 +652,8 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                   children: _colorOptions.map((hex) {
                     Color c;
                     try {
-                      c = Color(int.parse('FF${hex.substring(1)}', radix: 16));
+                      c = Color(
+                          int.parse('FF${hex.substring(1)}', radix: 16));
                     } catch (_) {
                       c = AppTheme.colorPrimario;
                     }
@@ -768,7 +667,8 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                           color: c,
                           shape: BoxShape.circle,
                           border: selected
-                              ? Border.all(color: AppTheme.colorTexto, width: 2)
+                              ? Border.all(
+                                  color: AppTheme.colorTexto, width: 2)
                               : null,
                         ),
                         child: selected

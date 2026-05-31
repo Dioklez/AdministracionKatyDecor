@@ -3,10 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert';
 import '../../services/api_service.dart';
+import '../../services/project_service.dart';
 import '../../database/local_repository.dart';
 import '../../widgets/sync_toast.dart';
 import '../../models/quote.dart';
-import '../../models/project.dart';
+import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
@@ -26,7 +27,7 @@ class _QuotesScreenState extends State<QuotesScreen> {
   String? _error;
 
   String _statusFilter = 'all';
-  int? _projectFilter;
+  String? _projectFilter;
 
   @override
   void initState() {
@@ -48,10 +49,12 @@ class _QuotesScreenState extends State<QuotesScreen> {
         quoteEndpoint += '?project_id=$_projectFilter';
       }
 
-      final results = await Future.wait([
+      final futures = <Future>[
         api.get(quoteEndpoint),
-        if (_projects.isEmpty) api.get('/api/mobile/projects'),
-      ]);
+        if (_projects.isEmpty) ProjectService().getAll(),
+      ];
+
+      final results = await Future.wait(futures);
 
       if (!mounted) return;
 
@@ -59,19 +62,15 @@ class _QuotesScreenState extends State<QuotesScreen> {
           .map((e) => Quote.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      List<Project> projects = _projects;
       if (results.length > 1) {
-        projects = (results[1] as List<dynamic>? ?? [])
-            .map((e) => Project.fromJson(e as Map<String, dynamic>))
-            .toList();
-        repo.upsertProjects(projects);
+        _projects = results[1] as List<Project>;
       }
 
       repo.upsertQuotes(quoteList);
 
       setState(() {
         _allQuotes = quoteList;
-        _projects = projects;
+        _projects = _projects;
         _loading = false;
       });
     } on ApiOfflineException {
@@ -84,15 +83,11 @@ class _QuotesScreenState extends State<QuotesScreen> {
   Future<void> _loadFromLocal() async {
     try {
       final repo = context.read<LocalRepository>();
-      final quoteList = _projectFilter != null
-          ? await repo.getQuotesByProjectId(_projectFilter!)
-          : await repo.getAllQuotes();
-      final projects =
-          _projects.isEmpty ? await repo.getAllProjects() : _projects;
+      final quoteList = await repo.getAllQuotes();
       if (!mounted) return;
       setState(() {
         _allQuotes = quoteList;
-        _projects = projects;
+        _projects = _projects;
         _loading = false;
         _error = null;
       });
@@ -106,8 +101,7 @@ class _QuotesScreenState extends State<QuotesScreen> {
     }
   }
 
-  Project? _projectById(int id) =>
-      _projects.where((p) => p.id == id).firstOrNull;
+  Project? _projectById(int? id) => null;
 
   List<Quote> get _filteredQuotes {
     if (_statusFilter == 'all') return _allQuotes;
@@ -252,7 +246,7 @@ class _QuotesScreenState extends State<QuotesScreen> {
         ),
         const SizedBox(width: 16),
         if (_projects.isNotEmpty)
-          DropdownButton<int?>(
+          DropdownButton<String?>(
             value: _projectFilter,
             hint: Text('Todos los proyectos',
                 style: GoogleFonts.inter(
@@ -261,10 +255,10 @@ class _QuotesScreenState extends State<QuotesScreen> {
             style: GoogleFonts.inter(
                 fontSize: 13, color: AppTheme.colorTextoSecundario),
             items: [
-              const DropdownMenuItem<int?>(
+              const DropdownMenuItem<String?>(
                   value: null, child: Text('Todos los proyectos')),
               ..._projects.map((p) =>
-                  DropdownMenuItem<int?>(value: p.id, child: Text(p.name))),
+                  DropdownMenuItem<String?>(value: p.id, child: Text(p.name))),
             ],
             onChanged: (v) {
               setState(() => _projectFilter = v);
@@ -561,7 +555,7 @@ class _NewQuoteDialogState extends State<_NewQuoteDialog> {
   final _descController = TextEditingController();
   final _amountController = TextEditingController();
   final _exchangeController = TextEditingController(text: '1');
-  int? _selectedProjectId;
+  String? _selectedProjectId;
   String _currency = 'MXN';
   String _status = 'pendiente';
   bool _saving = false;
@@ -576,7 +570,7 @@ class _NewQuoteDialogState extends State<_NewQuoteDialog> {
     if (q != null) {
       _descController.text = q.description ?? '';
       _amountController.text = q.amountMxn.toStringAsFixed(2);
-      _selectedProjectId = q.projectId;
+      _selectedProjectId = q.projectId.toString();
       _status = q.status;
     }
   }
@@ -701,13 +695,13 @@ class _NewQuoteDialogState extends State<_NewQuoteDialog> {
               children: [
                 // Proyecto (solo en creación)
                 if (!_isEditing)
-                  DropdownButtonFormField<int?>(
-                    initialValue: _selectedProjectId,
+                  DropdownButtonFormField<String?>(
+                    value: _selectedProjectId,
                     items: [
-                      const DropdownMenuItem<int?>(
+                      const DropdownMenuItem<String?>(
                           value: null, child: Text('— Selecciona un proyecto —')),
                       ...widget.projects.map((p) =>
-                          DropdownMenuItem<int?>(value: p.id, child: Text(p.name))),
+                          DropdownMenuItem<String?>(value: p.id, child: Text(p.name))),
                     ],
                     onChanged: (v) => setState(() => _selectedProjectId = v),
                     decoration: const InputDecoration(labelText: 'Proyecto *'),

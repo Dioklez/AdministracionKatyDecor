@@ -1,6 +1,5 @@
 import 'dart:convert';
 import '../database/local_repository.dart';
-import '../models/project.dart';
 import '../models/transaction.dart';
 import '../models/quote.dart';
 import '../models/task.dart';
@@ -151,7 +150,6 @@ class SyncService {
     }
 
     final futures = [
-      _safePull('projects', errors, () => _pullProjects(skipClear: skipClear)),
       _safePull('transactions', errors, () => _pullTransactions(skipClear: skipClear)),
       _safePull('quotes', errors, _pullQuotes),
       _safePull('tasks', errors, _pullTasks),
@@ -172,14 +170,6 @@ class SyncService {
     } catch (e) {
       errors.add('pull/$name: $e');
     }
-  }
-
-  Future<void> _pullProjects({bool skipClear = false}) async {
-    final data = await _api.get('/api/mobile/projects');
-    final list =
-        (data as List).map((e) => Project.fromJson(e as Map<String, dynamic>)).toList();
-    if (!skipClear) await _repo.clearProjects();
-    await _repo.upsertProjects(list);
   }
 
   Future<void> _pullTransactions({bool skipClear = false}) async {
