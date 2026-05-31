@@ -2,8 +2,6 @@ import 'dart:convert';
 import '../database/local_repository.dart';
 import '../models/project.dart';
 import '../models/transaction.dart';
-import '../models/supplier.dart';
-import '../models/supplier_product.dart';
 import '../models/quote.dart';
 import '../models/task.dart';
 import '../models/inventory_item.dart';
@@ -155,7 +153,6 @@ class SyncService {
     final futures = [
       _safePull('projects', errors, () => _pullProjects(skipClear: skipClear)),
       _safePull('transactions', errors, () => _pullTransactions(skipClear: skipClear)),
-      _safePull('suppliers', errors, _pullSuppliers),
       _safePull('quotes', errors, _pullQuotes),
       _safePull('tasks', errors, _pullTasks),
       _safePull('inventory', errors, _pullInventory),
@@ -192,17 +189,6 @@ class SyncService {
         .toList();
     if (!skipClear) await _repo.clearTransactions();
     await _repo.upsertTransactions(list);
-  }
-
-  Future<void> _pullSuppliers() async {
-    final data = await _api.get('/api/mobile/suppliers');
-    final suppliers = (data as List)
-        .map((e) => Supplier.fromJson(e as Map<String, dynamic>))
-        .toList();
-
-    // Limpiar y reinsertar proveedores (productos no se limpian aquí;
-    // se actualizan individualmente cuando el usuario abre la pantalla)
-    await _repo.upsertSuppliers(suppliers);
   }
 
   Future<void> _pullQuotes() async {
@@ -247,12 +233,6 @@ class SyncService {
   // ─────────────────────────────────────────────────────────────────────
   // HELPERS PÚBLICOS para uso en pantallas
   // ─────────────────────────────────────────────────────────────────────
-
-  /// Guarda los productos de un proveedor en local después de cargarlos.
-  Future<void> cacheSupplierProducts(
-      int supplierId, List<SupplierProduct> products) async {
-    await _repo.upsertSupplierProducts(supplierId, products);
-  }
 
   /// Guarda movimientos de inventario en local después de cargarlos.
   Future<void> cacheInventoryMovements(

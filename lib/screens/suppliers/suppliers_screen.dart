@@ -1,16 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
-import '../../database/local_repository.dart';
-import '../../widgets/sync_toast.dart';
-import '../../models/supplier.dart';
-import '../../models/supplier_product.dart';
+import '../../services/supplier_service.dart';
+import '../../models/supplier_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
-import '../../widgets/section_header.dart';
 
 class SuppliersScreen extends StatefulWidget {
   const SuppliersScreen({super.key});
@@ -24,11 +18,9 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   bool _loadingList = true;
   String? _listError;
 
-  int? _selectedId;
-  List<SupplierProduct> _products = [];
-  bool _loadingDetail = false;
-
+  String? _selectedId;
   final _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -42,99 +34,48 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     super.dispose();
   }
 
-  Future<void> _loadSuppliers({String q = ''}) async {
+  Future<void> _loadSuppliers() async {
     setState(() {
       _loadingList = true;
       _listError = null;
     });
     try {
-      final api = context.read<ApiService>();
-      final endpoint = q.isEmpty
-          ? '/api/mobile/suppliers'
-          : '/api/mobile/suppliers?q=${Uri.encodeQueryComponent(q)}';
-      final result = await api.get(endpoint);
+      final suppliers = await SupplierService().getAll();
       if (!mounted) return;
-      final suppliers = (result as List<dynamic>? ?? [])
-          .map((e) => Supplier.fromJson(e as Map<String, dynamic>))
-          .toList();
-      // Guardar en local (fire-and-forget, solo cuando sin filtro de búsqueda)
-      if (q.isEmpty) context.read<LocalRepository>().upsertSuppliers(suppliers);
       setState(() {
         _suppliers = suppliers;
         _loadingList = false;
       });
-    } on ApiOfflineException {
-      await _loadSuppliersFromLocal(q);
     } catch (e) {
-      await _loadSuppliersFromLocal(q);
-    }
-  }
-
-  Future<void> _loadSuppliersFromLocal(String q) async {
-    try {
-      final repo = context.read<LocalRepository>();
-      final suppliers = q.isEmpty
-          ? await repo.getAllSuppliers()
-          : await repo.searchSuppliers(q);
       if (mounted) {
         setState(() {
-          _suppliers = suppliers;
-          _loadingList = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _listError = 'Sin datos disponibles.';
+          _listError = 'No se pudo cargar los proveedores.';
           _loadingList = false;
         });
       }
     }
   }
 
-  Future<void> _selectSupplier(int id) async {
-    setState(() {
-      _selectedId = id;
-      _loadingDetail = true;
-      _products = [];
-    });
-    try {
-      final api = context.read<ApiService>();
-      final result = await api.get('/api/mobile/suppliers/$id/products');
-      if (!mounted) return;
-      final products = (result as List<dynamic>? ?? [])
-          .map((e) => SupplierProduct.fromJson(e as Map<String, dynamic>))
-          .toList();
-      // Guardar en local (fire-and-forget)
-      context.read<LocalRepository>().upsertSupplierProducts(id, products);
-      setState(() {
-        _products = products;
-        _loadingDetail = false;
-      });
-    } on ApiOfflineException {
-      await _loadProductsFromLocal(id);
-    } catch (e) {
-      await _loadProductsFromLocal(id);
-    }
+  void _selectSupplier(String id) {
+    setState(() => _selectedId = id);
   }
 
-  Future<void> _loadProductsFromLocal(int supplierId) async {
-    try {
-      final products = await context
-          .read<LocalRepository>()
-          .getProductsBySupplierId(supplierId);
-      if (mounted) setState(() {
-        _products = products;
-        _loadingDetail = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _loadingDetail = false);
-    }
-  }
+  Supplier? get _selectedSupplier =>
+      _selectedId == null
+          ? null
+          : _suppliers.where((s) => s.id == _selectedId).firstOrNull;
 
-  Supplier? get _selectedSupplier => _selectedId == null
-      ? null
-      : _suppliers.where((s) => s.id == _selectedId).firstOrNull;
+  List<Supplier> get _filtered {
+    if (_searchQuery.isEmpty) return _suppliers;
+    final q = _searchQuery.toLowerCase();
+    return _suppliers
+        .where((s) =>
+            s.name.toLowerCase().contains(q) ||
+            (s.contactName?.toLowerCase().contains(q) ?? false) ||
+            (s.phone?.contains(q) ?? false) ||
+            (s.email?.toLowerCase().contains(q) ?? false))
+        .toList();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -165,15 +106,11 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
             ),
           ),
           const Divider(height: 1),
-
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(
-                  width: 320,
-                  child: _buildLeftPanel(),
-                ),
+                SizedBox(width: 320, child: _buildLeftPanel()),
                 const VerticalDivider(width: 1),
                 Expanded(child: _buildRightPanel()),
               ],
@@ -187,6 +124,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   // ── Panel izquierdo ───────────────────────────────────────────────────────
 
   Widget _buildLeftPanel() {
+    final filtered = _filtered;
     return Column(
       children: [
         Padding(
@@ -196,19 +134,19 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
             decoration: InputDecoration(
               hintText: 'Buscar proveedor...',
               prefixIcon: const Icon(Icons.search, size: 18),
-              suffixIcon: _searchController.text.isNotEmpty
+              suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear, size: 16),
                       onPressed: () {
                         _searchController.clear();
-                        _loadSuppliers();
+                        setState(() => _searchQuery = '');
                       },
                     )
                   : null,
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             ),
-            onChanged: (v) => _loadSuppliers(q: v),
+            onChanged: (v) => setState(() => _searchQuery = v),
           ),
         ),
         const Divider(height: 1),
@@ -220,21 +158,30 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                       child: Text(_listError!,
                           style: GoogleFonts.inter(
                               color: AppTheme.colorTextoSecundario)))
-                  : _suppliers.isEmpty
-                      ? const EmptyState(
+                  : filtered.isEmpty
+                      ? EmptyState(
                           icon: Icons.store_outlined,
-                          title: 'Sin proveedores',
-                          subtitle: 'Crea tu primer proveedor',
+                          title: _searchQuery.isEmpty
+                              ? 'Sin proveedores'
+                              : 'Sin resultados',
+                          subtitle: _searchQuery.isEmpty
+                              ? 'Crea tu primer proveedor'
+                              : 'Intenta con otro término',
+                          actionLabel:
+                              _searchQuery.isEmpty ? 'Nuevo proveedor' : null,
+                          onAction:
+                              _searchQuery.isEmpty ? _showSupplierDialog : null,
                         )
                       : ListView.builder(
-                          itemCount: _suppliers.length,
+                          itemCount: filtered.length,
                           itemBuilder: (context, i) => _SupplierTile(
-                            supplier: _suppliers[i],
-                            selected: _selectedId == _suppliers[i].id,
-                            onTap: () => _selectSupplier(_suppliers[i].id),
-                            onEdit: () =>
-                                _showSupplierDialog(editSupplier: _suppliers[i]),
-                            onDelete: () => _confirmDeleteSupplier(_suppliers[i]),
+                            supplier: filtered[i],
+                            selected: _selectedId == filtered[i].id,
+                            onTap: () => _selectSupplier(filtered[i].id),
+                            onEdit: () => _showSupplierDialog(
+                                editSupplier: filtered[i]),
+                            onDelete: () =>
+                                _confirmDeleteSupplier(filtered[i]),
                           ),
                         ),
         ),
@@ -266,42 +213,19 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       return const EmptyState(
         icon: Icons.store_outlined,
         title: 'Selecciona un proveedor',
-        subtitle: 'Haz clic en un proveedor para ver su detalle y catálogo',
+        subtitle: 'Haz clic en un proveedor para ver su detalle',
       );
     }
-
     final s = _selectedSupplier;
     if (s == null) return const SizedBox.shrink();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSupplierHeader(s),
-          const SizedBox(height: 24),
-
-          SectionHeader(
-            title: 'Catálogo de productos',
-            actionLabel: '+ Agregar producto',
-            onAction: () => _showProductDialog(s.id),
-          ),
-          _loadingDetail
-              ? const ShimmerBox(height: 120)
-              : _products.isEmpty
-                  ? const EmptyState(
-                      icon: Icons.inventory_2_outlined,
-                      title: 'Sin productos',
-                      subtitle:
-                          'Agrega productos al catálogo de este proveedor',
-                    )
-                  : _buildProductsTable(s.id),
-        ],
-      ),
+      child: _buildSupplierDetail(s),
     );
   }
 
-  Widget _buildSupplierHeader(Supplier s) {
+  Widget _buildSupplierDetail(Supplier s) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -316,7 +240,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
             children: [
               Expanded(
                 child: Text(
-                  s.razonSocial,
+                  s.name,
                   style: GoogleFonts.inter(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -324,6 +248,24 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                   ),
                 ),
               ),
+              if (!s.isActive)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.colorTextoSecundario.withAlpha(25),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Inactivo',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.colorTextoSecundario,
+                    ),
+                  ),
+                ),
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_vert,
                     size: 18, color: AppTheme.colorTextoSecundario),
@@ -338,84 +280,33 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
               ),
             ],
           ),
-          if (s.rfc != null) ...[
-            const SizedBox(height: 4),
-            Text('RFC: ${s.rfc}',
-                style: GoogleFonts.inter(
-                    fontSize: 13, color: AppTheme.colorTextoSecundario)),
-          ],
           const SizedBox(height: 12),
           Wrap(
             spacing: 24,
             runSpacing: 8,
             children: [
-              if (s.actividad != null)
-                _InfoChip(icon: Icons.work_outline, label: s.actividad!),
-              if (s.contacto != null)
-                _InfoChip(icon: Icons.person_outline, label: s.contacto!),
-              if (s.telefono != null)
-                _InfoChip(icon: Icons.phone_outlined, label: s.telefono!),
+              if (s.contactName != null)
+                _InfoChip(
+                    icon: Icons.person_outline, label: s.contactName!),
+              if (s.phone != null)
+                _InfoChip(icon: Icons.phone_outlined, label: s.phone!),
               if (s.email != null)
                 _InfoChip(icon: Icons.email_outlined, label: s.email!),
-              if (s.ciudad != null)
-                _InfoChip(icon: Icons.location_on_outlined, label: s.ciudad!),
+              if (s.address != null)
+                _InfoChip(
+                    icon: Icons.location_on_outlined, label: s.address!),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProductsTable(int supplierId) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.colorCard,
-        borderRadius: BorderRadius.circular(AppTheme.radiusCard),
-        boxShadow: AppTheme.sombraCard,
-      ),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: AppTheme.colorBorde)),
+          if (s.notes != null && s.notes!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Divider(),
+            const SizedBox(height: 8),
+            Text(
+              s.notes!,
+              style: GoogleFonts.inter(
+                  fontSize: 13, color: AppTheme.colorTextoSecundario),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 4,
-                  child: Text('Producto',
-                      style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.colorTextoSecundario)),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text('Unidad',
-                      style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.colorTextoSecundario)),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text('Precio',
-                      textAlign: TextAlign.right,
-                      style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.colorTextoSecundario)),
-                ),
-                const SizedBox(width: 40),
-              ],
-            ),
-          ),
-          ..._products.map((p) => _ProductRow(
-                product: p,
-                onEdit: () => _showProductDialog(supplierId, editProduct: p),
-                onDelete: () => _confirmDeleteProduct(supplierId, p),
-              )),
+          ],
         ],
       ),
     );
@@ -426,28 +317,11 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   void _showSupplierDialog({Supplier? editSupplier}) {
     showDialog(
       context: context,
-      builder: (ctx) => _NewSupplierDialog(
+      builder: (ctx) => _SupplierDialog(
         editSupplier: editSupplier,
-        onSaved: (newId) {
-          Navigator.of(ctx).pop();
-          _loadSuppliers().then((_) {
-            final id = editSupplier?.id ?? newId;
-            if (id != null) _selectSupplier(id);
-          });
-        },
-      ),
-    );
-  }
-
-  void _showProductDialog(int supplierId, {SupplierProduct? editProduct}) {
-    showDialog(
-      context: context,
-      builder: (ctx) => _NewProductDialog(
-        supplierId: supplierId,
-        editProduct: editProduct,
         onSaved: () {
           Navigator.of(ctx).pop();
-          _selectSupplier(supplierId);
+          _loadSuppliers();
         },
       ),
     );
@@ -457,64 +331,9 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('¿Eliminar "${s.razonSocial}"?',
-            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
-        content: Text('Se eliminarán también todos sus productos. Esta acción no se puede deshacer.',
-            style: GoogleFonts.inter(fontSize: 13)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.colorError),
-            child: const Text('Eliminar'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true && mounted) {
-      try {
-        final api = context.read<ApiService>();
-        await api.delete('/api/mobile/suppliers/${s.id}');
-        setState(() {
-          _selectedId = null;
-          _products = [];
-        });
-        _loadSuppliers();
-      } on ApiOfflineException {
-        final repo = context.read<LocalRepository>();
-        await repo.addPendingOp(
-          entityType: 'supplier',
-          operation: 'delete',
-          entityId: s.id,
-          endpoint: '/api/mobile/suppliers/${s.id}',
-        );
-        repo.deleteSupplier(s.id);
-        setState(() {
-          _suppliers.removeWhere((x) => x.id == s.id);
-          _selectedId = null;
-          _products = [];
-        });
-        SyncToast.show(context, 'Eliminado localmente. Se sincronizará al reconectar.');
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No se pudo eliminar el proveedor.')),
-          );
-        }
-      }
-    }
-  }
-
-  Future<void> _confirmDeleteProduct(int supplierId, SupplierProduct p) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('¿Eliminar "${p.nombre}"?',
-            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
+        title: Text('¿Eliminar "${s.name}"?',
+            style:
+                GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
         content: Text('Esta acción no se puede deshacer.',
             style: GoogleFonts.inter(fontSize: 13)),
         actions: [
@@ -524,8 +343,8 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.colorError),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: AppTheme.colorError),
             child: const Text('Eliminar'),
           ),
         ],
@@ -533,24 +352,18 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        final api = context.read<ApiService>();
-        await api.delete('/api/mobile/suppliers/$supplierId/products/${p.id}');
-        _selectSupplier(supplierId);
-      } on ApiOfflineException {
-        final repo = context.read<LocalRepository>();
-        await repo.addPendingOp(
-          entityType: 'supplier_product',
-          operation: 'delete',
-          entityId: p.id,
-          endpoint: '/api/mobile/suppliers/$supplierId/products/${p.id}',
-        );
-        repo.deleteSupplierProduct(p.id);
-        setState(() => _products.removeWhere((x) => x.id == p.id));
-        SyncToast.show(context, 'Eliminado localmente. Se sincronizará al reconectar.');
+        await SupplierService().delete(s.id);
+        if (mounted) {
+          setState(() {
+            if (_selectedId == s.id) _selectedId = null;
+          });
+          _loadSuppliers();
+        }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No se pudo eliminar el producto.')),
+            const SnackBar(
+                content: Text('No se pudo eliminar el proveedor.')),
           );
         }
       }
@@ -584,6 +397,7 @@ class _SupplierTileState extends State<_SupplierTile> {
 
   @override
   Widget build(BuildContext context) {
+    final s = widget.supplier;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -614,46 +428,50 @@ class _SupplierTileState extends State<_SupplierTile> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      widget.supplier.razonSocial,
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: widget.selected
-                            ? AppTheme.colorPrimario
-                            : AppTheme.colorTexto,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
                     Row(
                       children: [
-                        if (widget.supplier.rfc != null) ...[
-                          Text(
-                            widget.supplier.rfc!,
+                        Expanded(
+                          child: Text(
+                            s.name,
                             style: GoogleFonts.inter(
-                              fontSize: 11,
-                              color: AppTheme.colorTextoSecundario,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: widget.selected
+                                  ? AppTheme.colorPrimario
+                                  : AppTheme.colorTexto,
                             ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(width: 6),
-                          const Text('·',
-                              style: TextStyle(
-                                  color: AppTheme.colorTextoSecundario)),
-                          const SizedBox(width: 6),
-                        ],
-                        if (widget.supplier.actividad != null)
-                          Expanded(
+                        ),
+                        if (!s.isActive)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color:
+                                  AppTheme.colorTextoSecundario.withAlpha(25),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                             child: Text(
-                              widget.supplier.actividad!,
+                              'Inactivo',
                               style: GoogleFonts.inter(
-                                fontSize: 11,
-                                color: AppTheme.colorTextoSecundario,
-                              ),
-                              overflow: TextOverflow.ellipsis,
+                                  fontSize: 10,
+                                  color: AppTheme.colorTextoSecundario),
                             ),
                           ),
                       ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        if (s.contactName != null) s.contactName,
+                        if (s.phone != null) s.phone,
+                      ].whereType<String>().join(' · '),
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: AppTheme.colorTextoSecundario,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
@@ -673,85 +491,6 @@ class _SupplierTileState extends State<_SupplierTile> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ── Fila de producto ──────────────────────────────────────────────────────────
-
-class _ProductRow extends StatelessWidget {
-  final SupplierProduct product;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-
-  const _ProductRow({
-    required this.product,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final p = product;
-    final precioStr = p.precio != null
-        ? '\$${p.precio!.toStringAsFixed(2)} ${p.moneda}'
-        : '—';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppTheme.colorBorde)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 4,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(p.nombre,
-                    style: GoogleFonts.inter(
-                        fontSize: 13, color: AppTheme.colorTexto)),
-                if (p.notas != null)
-                  Text(p.notas!,
-                      style: GoogleFonts.inter(
-                          fontSize: 11,
-                          color: AppTheme.colorTextoSecundario)),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(p.unidad ?? '—',
-                style: GoogleFonts.inter(
-                    fontSize: 13, color: AppTheme.colorTextoSecundario)),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(precioStr,
-                textAlign: TextAlign.right,
-                style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: AppTheme.colorTexto)),
-          ),
-          SizedBox(
-            width: 40,
-            child: PopupMenuButton<String>(
-              icon: Icon(Icons.more_vert,
-                  size: 16, color: AppTheme.colorTextoSecundario),
-              onSelected: (v) {
-                if (v == 'edit') onEdit();
-                if (v == 'delete') onDelete();
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'edit', child: Text('Editar')),
-                PopupMenuItem(value: 'delete', child: Text('Eliminar')),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -782,25 +521,25 @@ class _InfoChip extends StatelessWidget {
 
 // ── Dialog: Nuevo / Editar proveedor ─────────────────────────────────────────
 
-class _NewSupplierDialog extends StatefulWidget {
-  final void Function(int? newId) onSaved;
+class _SupplierDialog extends StatefulWidget {
+  final VoidCallback onSaved;
   final Supplier? editSupplier;
 
-  const _NewSupplierDialog({required this.onSaved, this.editSupplier});
+  const _SupplierDialog({required this.onSaved, this.editSupplier});
 
   @override
-  State<_NewSupplierDialog> createState() => _NewSupplierDialogState();
+  State<_SupplierDialog> createState() => _SupplierDialogState();
 }
 
-class _NewSupplierDialogState extends State<_NewSupplierDialog> {
+class _SupplierDialogState extends State<_SupplierDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _razonController = TextEditingController();
-  final _rfcController = TextEditingController();
-  final _actividadController = TextEditingController();
-  final _contactoController = TextEditingController();
-  final _ciudadController = TextEditingController();
-  final _telefonoController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _contactNameController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _notesController = TextEditingController();
+  bool _isActive = true;
   bool _saving = false;
   String? _error;
 
@@ -811,25 +550,24 @@ class _NewSupplierDialogState extends State<_NewSupplierDialog> {
     super.initState();
     final s = widget.editSupplier;
     if (s != null) {
-      _razonController.text = s.razonSocial;
-      _rfcController.text = s.rfc ?? '';
-      _actividadController.text = s.actividad ?? '';
-      _contactoController.text = s.contacto ?? '';
-      _ciudadController.text = s.ciudad ?? '';
-      _telefonoController.text = s.telefono ?? '';
+      _nameController.text = s.name;
+      _contactNameController.text = s.contactName ?? '';
+      _phoneController.text = s.phone ?? '';
       _emailController.text = s.email ?? '';
+      _addressController.text = s.address ?? '';
+      _notesController.text = s.notes ?? '';
+      _isActive = s.isActive;
     }
   }
 
   @override
   void dispose() {
-    _razonController.dispose();
-    _rfcController.dispose();
-    _actividadController.dispose();
-    _contactoController.dispose();
-    _ciudadController.dispose();
-    _telefonoController.dispose();
+    _nameController.dispose();
+    _contactNameController.dispose();
+    _phoneController.dispose();
     _emailController.dispose();
+    _addressController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
@@ -839,78 +577,22 @@ class _NewSupplierDialogState extends State<_NewSupplierDialog> {
       _saving = true;
       _error = null;
     });
-    final body = <String, dynamic>{
-      'razon_social': _razonController.text.trim(),
-      if (_rfcController.text.isNotEmpty) 'rfc': _rfcController.text.trim(),
-      if (_actividadController.text.isNotEmpty)
-        'actividad': _actividadController.text.trim(),
-      if (_contactoController.text.isNotEmpty)
-        'contacto': _contactoController.text.trim(),
-      if (_ciudadController.text.isNotEmpty)
-        'ciudad': _ciudadController.text.trim(),
-      if (_telefonoController.text.isNotEmpty)
-        'telefono': _telefonoController.text.trim(),
-      if (_emailController.text.isNotEmpty)
-        'email': _emailController.text.trim(),
+    final data = {
+      'name': _nameController.text.trim(),
+      'contactName': _contactNameController.text.trim(),
+      'phone': _phoneController.text.trim(),
+      'email': _emailController.text.trim(),
+      'address': _addressController.text.trim(),
+      'notes': _notesController.text.trim(),
+      'isActive': _isActive,
     };
     try {
-      final api = context.read<ApiService>();
       if (_isEditing) {
-        await api.put('/api/mobile/suppliers/${widget.editSupplier!.id}', body);
-        if (mounted) widget.onSaved(null);
+        await SupplierService().update(widget.editSupplier!.id, data);
       } else {
-        final result = await api.post('/api/mobile/suppliers', body);
-        if (mounted) {
-          final newId = (result as Map<String, dynamic>?)?['id'] as int?;
-          widget.onSaved(newId);
-        }
+        await SupplierService().create(data);
       }
-    } on ApiOfflineException {
-      if (!mounted) return;
-      final repo = context.read<LocalRepository>();
-      if (_isEditing) {
-        final id = widget.editSupplier!.id;
-        await repo.addPendingOp(
-          entityType: 'supplier',
-          operation: 'update',
-          entityId: id,
-          endpoint: '/api/mobile/suppliers/$id',
-          payload: jsonEncode(body),
-        );
-        repo.upsertSupplier(Supplier(
-          id: id,
-          razonSocial: _razonController.text.trim(),
-          rfc: _rfcController.text.isEmpty ? null : _rfcController.text.trim(),
-          actividad: _actividadController.text.isEmpty ? null : _actividadController.text.trim(),
-          contacto: _contactoController.text.isEmpty ? null : _contactoController.text.trim(),
-          ciudad: _ciudadController.text.isEmpty ? null : _ciudadController.text.trim(),
-          telefono: _telefonoController.text.isEmpty ? null : _telefonoController.text.trim(),
-          email: _emailController.text.isEmpty ? null : _emailController.text.trim(),
-        ));
-        SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-        widget.onSaved(null);
-      } else {
-        final tempId = -DateTime.now().millisecondsSinceEpoch;
-        await repo.addPendingOp(
-          entityType: 'supplier',
-          operation: 'create',
-          tempId: tempId,
-          endpoint: '/api/mobile/suppliers',
-          payload: jsonEncode(body),
-        );
-        repo.upsertSupplier(Supplier(
-          id: tempId,
-          razonSocial: _razonController.text.trim(),
-          rfc: _rfcController.text.isEmpty ? null : _rfcController.text.trim(),
-          actividad: _actividadController.text.isEmpty ? null : _actividadController.text.trim(),
-          contacto: _contactoController.text.isEmpty ? null : _contactoController.text.trim(),
-          ciudad: _ciudadController.text.isEmpty ? null : _ciudadController.text.trim(),
-          telefono: _telefonoController.text.isEmpty ? null : _telefonoController.text.trim(),
-          email: _emailController.text.isEmpty ? null : _emailController.text.trim(),
-        ));
-        SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-        widget.onSaved(tempId);
-      }
+      if (mounted) widget.onSaved();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -939,9 +621,9 @@ class _NewSupplierDialogState extends State<_NewSupplierDialog> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextFormField(
-                  controller: _razonController,
+                  controller: _nameController,
                   decoration:
-                      const InputDecoration(labelText: 'Razón social *'),
+                      const InputDecoration(labelText: 'Nombre *'),
                   validator: (v) =>
                       v == null || v.trim().isEmpty ? 'Requerido' : null,
                 ),
@@ -950,26 +632,7 @@ class _NewSupplierDialogState extends State<_NewSupplierDialog> {
                   children: [
                     Expanded(
                       child: TextFormField(
-                        controller: _rfcController,
-                        decoration: const InputDecoration(labelText: 'RFC'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: _actividadController,
-                        decoration:
-                            const InputDecoration(labelText: 'Actividad'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _contactoController,
+                        controller: _contactNameController,
                         decoration:
                             const InputDecoration(labelText: 'Contacto'),
                       ),
@@ -977,7 +640,7 @@ class _NewSupplierDialogState extends State<_NewSupplierDialog> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
-                        controller: _telefonoController,
+                        controller: _phoneController,
                         decoration:
                             const InputDecoration(labelText: 'Teléfono'),
                       ),
@@ -990,16 +653,38 @@ class _NewSupplierDialogState extends State<_NewSupplierDialog> {
                     Expanded(
                       child: TextFormField(
                         controller: _emailController,
-                        decoration: const InputDecoration(labelText: 'Email'),
+                        decoration:
+                            const InputDecoration(labelText: 'Email'),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
-                        controller: _ciudadController,
+                        controller: _addressController,
                         decoration:
-                            const InputDecoration(labelText: 'Ciudad'),
+                            const InputDecoration(labelText: 'Dirección'),
                       ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: _notesController,
+                  decoration:
+                      const InputDecoration(labelText: 'Notas (opcional)'),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Text('Activo',
+                        style: GoogleFonts.inter(
+                            fontSize: 13, color: AppTheme.colorTexto)),
+                    const Spacer(),
+                    Switch(
+                      value: _isActive,
+                      onChanged: (v) => setState(() => _isActive = v),
+                      activeThumbColor: AppTheme.colorPrimario,
                     ),
                   ],
                 ),
@@ -1028,214 +713,6 @@ class _NewSupplierDialogState extends State<_NewSupplierDialog> {
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
               : Text(_isEditing ? 'Guardar cambios' : 'Crear proveedor'),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Dialog: Nuevo / Editar producto ──────────────────────────────────────────
-
-class _NewProductDialog extends StatefulWidget {
-  final int supplierId;
-  final VoidCallback onSaved;
-  final SupplierProduct? editProduct;
-
-  const _NewProductDialog({
-    required this.supplierId,
-    required this.onSaved,
-    this.editProduct,
-  });
-
-  @override
-  State<_NewProductDialog> createState() => _NewProductDialogState();
-}
-
-class _NewProductDialogState extends State<_NewProductDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _nombreController = TextEditingController();
-  final _unidadController = TextEditingController();
-  final _precioController = TextEditingController();
-  String _moneda = 'MXN';
-  bool _saving = false;
-  String? _error;
-
-  bool get _isEditing => widget.editProduct != null;
-
-  @override
-  void initState() {
-    super.initState();
-    final p = widget.editProduct;
-    if (p != null) {
-      _nombreController.text = p.nombre;
-      _unidadController.text = p.unidad ?? '';
-      _precioController.text = p.precio?.toStringAsFixed(2) ?? '';
-      _moneda = p.moneda;
-    }
-  }
-
-  @override
-  void dispose() {
-    _nombreController.dispose();
-    _unidadController.dispose();
-    _precioController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    final precio = double.tryParse(_precioController.text);
-    final body = {
-      'nombre': _nombreController.text.trim(),
-      if (_unidadController.text.isNotEmpty)
-        'unidad': _unidadController.text.trim(),
-      'precio': precio,
-      'moneda': _moneda,
-    };
-    try {
-      final api = context.read<ApiService>();
-      if (_isEditing) {
-        await api.put(
-            '/api/mobile/suppliers/${widget.supplierId}/products/${widget.editProduct!.id}',
-            body);
-      } else {
-        await api.post(
-            '/api/mobile/suppliers/${widget.supplierId}/products', body);
-      }
-      if (mounted) widget.onSaved();
-    } on ApiOfflineException {
-      if (!mounted) return;
-      final repo = context.read<LocalRepository>();
-      if (_isEditing) {
-        final pid = widget.editProduct!.id;
-        await repo.addPendingOp(
-          entityType: 'supplier_product',
-          operation: 'update',
-          entityId: pid,
-          endpoint: '/api/mobile/suppliers/${widget.supplierId}/products/$pid',
-          payload: jsonEncode(body),
-        );
-        repo.upsertSupplierProduct(widget.supplierId, SupplierProduct(
-          id: pid,
-          nombre: _nombreController.text.trim(),
-          unidad: _unidadController.text.isEmpty ? null : _unidadController.text.trim(),
-          precio: precio,
-          moneda: _moneda,
-        ));
-      } else {
-        final tempId = -DateTime.now().millisecondsSinceEpoch;
-        await repo.addPendingOp(
-          entityType: 'supplier_product',
-          operation: 'create',
-          tempId: tempId,
-          endpoint: '/api/mobile/suppliers/${widget.supplierId}/products',
-          payload: jsonEncode(body),
-        );
-        repo.upsertSupplierProduct(widget.supplierId, SupplierProduct(
-          id: tempId,
-          nombre: _nombreController.text.trim(),
-          unidad: _unidadController.text.isEmpty ? null : _unidadController.text.trim(),
-          precio: precio,
-          moneda: _moneda,
-        ));
-      }
-      SyncToast.show(context, 'Guardado localmente. Se sincronizará al reconectar.');
-      widget.onSaved();
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = _isEditing
-              ? 'No se pudo guardar los cambios.'
-              : 'No se pudo agregar el producto.';
-          _saving = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(
-        _isEditing ? 'Editar producto' : 'Agregar producto',
-        style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
-      ),
-      content: SizedBox(
-        width: 360,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: _nombreController,
-                decoration:
-                    const InputDecoration(labelText: 'Nombre del producto *'),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Requerido' : null,
-              ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _unidadController,
-                decoration: const InputDecoration(
-                    labelText: 'Unidad (pieza, kg, m², ...)'),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: TextFormField(
-                      controller: _precioController,
-                      keyboardType: TextInputType.number,
-                      decoration:
-                          const InputDecoration(labelText: 'Precio (opcional)'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _moneda,
-                      items: const [
-                        DropdownMenuItem(value: 'MXN', child: Text('MXN')),
-                        DropdownMenuItem(value: 'USD', child: Text('USD')),
-                      ],
-                      onChanged: (v) =>
-                          setState(() => _moneda = v ?? 'MXN'),
-                      decoration: const InputDecoration(labelText: 'Moneda'),
-                    ),
-                  ),
-                ],
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!,
-                    style: GoogleFonts.inter(
-                        color: AppTheme.colorError, fontSize: 13)),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
-        ),
-        ElevatedButton(
-          onPressed: _saving ? null : _save,
-          child: _saving
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : Text(_isEditing ? 'Guardar cambios' : 'Agregar'),
         ),
       ],
     );

@@ -49,37 +49,6 @@ class Transactions extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-// ── Proveedores ────────────────────────────────────────────────────────────
-@DataClassName('SupplierRow')
-class Suppliers extends Table {
-  IntColumn get id => integer()();
-  TextColumn get razonSocial => text()();
-  TextColumn get rfc => text().nullable()();
-  TextColumn get actividad => text().nullable()();
-  TextColumn get ciudad => text().nullable()();
-  TextColumn get telefono => text().nullable()();
-  TextColumn get email => text().nullable()();
-  TextColumn get contacto => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
-// ── Productos de proveedor ─────────────────────────────────────────────────
-@DataClassName('SupplierProductRow')
-class SupplierProducts extends Table {
-  IntColumn get id => integer()();
-  IntColumn get supplierId => integer()();
-  TextColumn get nombre => text()();
-  TextColumn get unidad => text().nullable()();
-  RealColumn get precio => real().nullable()();
-  TextColumn get moneda => text().withDefault(const Constant('MXN'))();
-  TextColumn get notas => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
 // ── Cotizaciones ───────────────────────────────────────────────────────────
 @DataClassName('QuoteRow')
 class Quotes extends Table {
@@ -194,8 +163,6 @@ class CacheEntries extends Table {
 @DriftDatabase(tables: [
   Projects,
   Transactions,
-  Suppliers,
-  SupplierProducts,
   Quotes,
   Tasks,
   InventoryItems,

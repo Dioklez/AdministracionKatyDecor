@@ -1,8 +1,6 @@
 import 'package:drift/drift.dart';
 import '../models/project.dart';
 import '../models/transaction.dart';
-import '../models/supplier.dart';
-import '../models/supplier_product.dart';
 import '../models/quote.dart';
 import '../models/task.dart';
 import '../models/inventory_item.dart';
@@ -176,122 +174,6 @@ class LocalRepository {
         etapa: Value(t.etapa),
         notes: Value(t.notes),
         createdAt: Value(t.createdAt),
-      );
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // PROVEEDORES
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<Supplier>> getAllSuppliers() async {
-    final rows = await _db.select(_db.suppliers).get();
-    return rows.map(_supplierFromRow).toList();
-  }
-
-  Future<List<Supplier>> searchSuppliers(String query) async {
-    final q = '%$query%';
-    final rows = await (_db.select(_db.suppliers)
-          ..where((t) => t.razonSocial.like(q)))
-        .get();
-    return rows.map(_supplierFromRow).toList();
-  }
-
-  Future<void> upsertSupplier(Supplier s) async {
-    await _db
-        .into(_db.suppliers)
-        .insertOnConflictUpdate(_supplierToCompanion(s));
-  }
-
-  Future<void> upsertSuppliers(List<Supplier> suppliers) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-          _db.suppliers, suppliers.map(_supplierToCompanion).toList());
-    });
-  }
-
-  Future<void> deleteSupplier(int id) async {
-    await (_db.delete(_db.suppliers)..where((t) => t.id.equals(id))).go();
-    await (_db.delete(_db.supplierProducts)
-          ..where((t) => t.supplierId.equals(id)))
-        .go();
-  }
-
-  Supplier _supplierFromRow(SupplierRow row) => Supplier.fromJson({
-        'id': row.id,
-        'razon_social': row.razonSocial,
-        'rfc': row.rfc,
-        'actividad': row.actividad,
-        'ciudad': row.ciudad,
-        'telefono': row.telefono,
-        'email': row.email,
-        'contacto': row.contacto,
-      });
-
-  SuppliersCompanion _supplierToCompanion(Supplier s) => SuppliersCompanion(
-        id: Value(s.id),
-        razonSocial: Value(s.razonSocial),
-        rfc: Value(s.rfc),
-        actividad: Value(s.actividad),
-        ciudad: Value(s.ciudad),
-        telefono: Value(s.telefono),
-        email: Value(s.email),
-        contacto: Value(s.contacto),
-      );
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // PRODUCTOS DE PROVEEDOR
-  // ═══════════════════════════════════════════════════════════════════════
-
-  Future<List<SupplierProduct>> getProductsBySupplierId(
-      int supplierId) async {
-    final rows = await (_db.select(_db.supplierProducts)
-          ..where((t) => t.supplierId.equals(supplierId)))
-        .get();
-    return rows.map(_supplierProductFromRow).toList();
-  }
-
-  Future<void> upsertSupplierProduct(
-      int supplierId, SupplierProduct product) async {
-    await _db.into(_db.supplierProducts).insertOnConflictUpdate(
-        _supplierProductToCompanion(supplierId, product));
-  }
-
-  Future<void> upsertSupplierProducts(
-      int supplierId, List<SupplierProduct> products) async {
-    await _db.batch((b) {
-      b.insertAllOnConflictUpdate(
-        _db.supplierProducts,
-        products
-            .map((p) => _supplierProductToCompanion(supplierId, p))
-            .toList(),
-      );
-    });
-  }
-
-  Future<void> deleteSupplierProduct(int id) async {
-    await (_db.delete(_db.supplierProducts)..where((t) => t.id.equals(id)))
-        .go();
-  }
-
-  SupplierProduct _supplierProductFromRow(SupplierProductRow row) =>
-      SupplierProduct.fromJson({
-        'id': row.id,
-        'nombre': row.nombre,
-        'unidad': row.unidad,
-        'precio': row.precio,
-        'moneda': row.moneda,
-        'notas': row.notas,
-      });
-
-  SupplierProductsCompanion _supplierProductToCompanion(
-          int supplierId, SupplierProduct p) =>
-      SupplierProductsCompanion(
-        id: Value(p.id),
-        supplierId: Value(supplierId),
-        nombre: Value(p.nombre),
-        unidad: Value(p.unidad),
-        precio: Value(p.precio),
-        moneda: Value(p.moneda),
-        notas: Value(p.notas),
       );
 
   // ═══════════════════════════════════════════════════════════════════════
