@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
@@ -76,12 +77,16 @@ class _ShellScreenState extends State<ShellScreen> {
   Future<void> _checkConnectivity() async {
     if (!mounted) return;
     try {
-      await _apiService?.get('/api/auth/verify');
+      final response = await http
+          .head(Uri.parse('https://katydecorpocketbase.fly.dev/api/health'))
+          .timeout(const Duration(seconds: 5));
       if (!mounted) return;
-      if (!_isOnline) {
+      final online = response.statusCode < 500;
+      if (online && !_isOnline) {
         setState(() => _isOnline = true);
-        // Reconexión detectada: enviar ops pendientes antes de actualizar datos
         _syncService?.fullSync().then((_) {}, onError: (_) {});
+      } else if (!online && _isOnline) {
+        setState(() => _isOnline = false);
       }
     } catch (_) {
       if (mounted && _isOnline) setState(() => _isOnline = false);

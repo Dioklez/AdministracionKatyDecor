@@ -33,4 +33,16 @@ class PocketBaseService {
     await prefs.remove(_keyModel);
     pb.authStore.clear();
   }
+
+  bool get isLoggedIn => pb.authStore.isValid;
+
+  Future<void> login(String email, String password) async {
+    final result =
+        await pb.collection('users').authWithPassword(email, password);
+    await saveAuthToken(result.token, result.record!);
+  }
+
+  Future<void> logout() async {
+    await clearAuthToken();
+  }
 }

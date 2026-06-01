@@ -8,6 +8,8 @@ class ApiService {
 
   ApiService(this._auth);
 
+  static const String _baseUrl = 'https://katydecor-admin.onrender.com';
+
   DateTime? _lastOnlineCheck;
   bool _lastOnlineResult = false;
 
@@ -16,12 +18,11 @@ class ApiService {
     'Authorization': 'Bearer ${_auth.token ?? ''}',
   };
 
-  String _url(String endpoint) => '${AuthService.serverUrl}$endpoint';
+  String _url(String endpoint) => '$_baseUrl$endpoint';
 
   /// Maneja la respuesta: lanza excepción según el código HTTP.
   dynamic _handle(http.Response response) {
     if (response.statusCode == 401) {
-      _auth.logout();
       throw ApiUnauthorizedException();
     }
     if (response.statusCode >= 400) {
@@ -105,7 +106,7 @@ class ApiService {
     }
     try {
       final response = await http
-          .head(Uri.parse('${AuthService.serverUrl}/api/auth/verify'))
+          .head(Uri.parse('$_baseUrl/api/auth/verify'))
           .timeout(const Duration(seconds: 3));
       _lastOnlineResult = response.statusCode < 500;
       _lastOnlineCheck = now;

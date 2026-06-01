@@ -141,10 +141,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 6),
                   TextFormField(
                     controller: _userController,
+                    keyboardType: TextInputType.text,
                     style: GoogleFonts.inter(fontSize: 14),
                     decoration: const InputDecoration(
-                      hintText: 'admin',
-                      prefixIcon: Icon(Icons.person_outline, size: 18),
+                      hintText: 'katyadmin',
+                      prefixIcon: Icon(Icons.person_outlined, size: 18),
                     ),
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) {

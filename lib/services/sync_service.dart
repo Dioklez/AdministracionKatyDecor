@@ -1,131 +1,24 @@
-import 'dart:convert';
 import '../database/local_repository.dart';
 import 'api_service.dart';
 
+/// SyncService — temporalmente desactivado.
+/// La sincronización con Flask (ApiService) quedó fuera de uso al migrar
+/// el backend a PocketBase. Los métodos conservan su firma para que
+/// app.dart y splash_screen.dart compilen sin cambios.
+/// La sincronización real con PocketBase se implementará después.
 class SyncService {
+  // ignore: unused_field
   final ApiService _api;
+  // ignore: unused_field
   final LocalRepository _repo;
-  bool _syncing = false;
 
   SyncService(this._api, this._repo);
 
-  bool get isSyncing => _syncing;
+  bool get isSyncing => false;
 
-  /// Sync completo: push ops pendientes → pull todos los datos.
   Future<SyncResult> fullSync() async {
-    if (_syncing) return SyncResult(pendingPushed: 0, errors: []);
-    _syncing = true;
-    final errors = <String>[];
-    var pushed = 0;
-
-    try {
-      // 1. Push primero — así el servidor tiene los últimos datos antes del pull
-      final pushResult = await _pushPendingOps();
-      pushed = pushResult.pushed;
-      errors.addAll(pushResult.errors);
-
-    } catch (e) {
-      errors.add('fullSync: $e');
-    } finally {
-      _syncing = false;
-    }
-
-    return SyncResult(pendingPushed: pushed, errors: errors);
+    return SyncResult(pendingPushed: 0, errors: []);
   }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // PUSH
-  // ─────────────────────────────────────────────────────────────────────
-
-  Future<_PushResult> _pushPendingOps() async {
-    final ops = await _repo.getAllPendingOps();
-    print('[SYNC] Iniciando push de operaciones pendientes');
-    print('[SYNC] Total ops pendientes: ${ops.length}');
-    var pushed = 0;
-    final errors = <String>[];
-
-    // Mapa tempId → realId para resolver dependencias entre ops de la misma sesión
-    final Map<int, int> idMap = {};
-
-    for (final op in ops) {
-      // Descartar ops UPDATE/DELETE con IDs negativos en la URL:
-      // la entidad nunca llegó al servidor, no hay nada que actualizar/borrar.
-      if (op.endpoint.contains('/-')) {
-        print('[SYNC] Descartando op con tempId en URL: ${op.endpoint}');
-        await _repo.deletePendingOp(op.id);
-        continue;
-      }
-
-      // Resolver referencias a tempIds en el payload usando el mapa acumulado
-      String? resolvedPayload = op.payload;
-      if (resolvedPayload != null && idMap.isNotEmpty) {
-        final payloadMap =
-            jsonDecode(resolvedPayload) as Map<String, dynamic>;
-        bool changed = false;
-        for (final entry in idMap.entries) {
-          payloadMap.forEach((key, value) {
-            if (value == entry.key) {
-              payloadMap[key] = entry.value;
-              changed = true;
-              print('[SYNC] Resolviendo $key: ${entry.key} → ${entry.value}');
-            }
-          });
-        }
-        if (changed) {
-          resolvedPayload = jsonEncode(payloadMap);
-          await _repo.updatePendingOpPayload(op.id, resolvedPayload);
-        }
-      }
-
-      print('[SYNC] Ejecutando: ${op.operation.toUpperCase()} ${op.endpoint}');
-      print('[SYNC] Payload: $resolvedPayload');
-
-      try {
-        final body = resolvedPayload != null
-            ? jsonDecode(resolvedPayload) as Map<String, dynamic>
-            : <String, dynamic>{};
-
-        dynamic response;
-        switch (op.operation) {
-          case 'create':
-            response = await _api.post(op.endpoint, body);
-          case 'update':
-            response = await _api.put(op.endpoint, body);
-          case 'delete':
-            await _api.delete(op.endpoint);
-        }
-
-        // Si fue un CREATE con tempId, registrar el mapeo tempId → realId
-        if (op.operation == 'create' && op.tempId != null) {
-          final serverMap = response as Map<String, dynamic>?;
-          final realId = serverMap?['id'] as int?;
-          if (realId != null) {
-            idMap[op.tempId!] = realId;
-            print('[SYNC] Mapeado tempId ${op.tempId} → realId $realId');
-            await _repo.updateLocalId(op.entityType, op.tempId!, realId);
-          }
-        }
-
-        print('[SYNC] Op completada: ${op.id}');
-        await _repo.deletePendingOp(op.id);
-        pushed++;
-      } on ApiOfflineException {
-        print('[SYNC] Sin conexión, deteniendo push');
-        break;
-      } catch (e) {
-        print('[SYNC] Op falló: $e');
-        if (e is ApiException) {
-          print('[SYNC] Status: ${e.statusCode}, Msg: ${e.message}');
-        }
-        print('[SYNC] Descartando op fallida: ${op.id}');
-        await _repo.deletePendingOp(op.id);
-        errors.add('DROPPED ${op.entityType}/${op.operation} (${op.endpoint}): $e');
-      }
-    }
-
-    return _PushResult(pushed: pushed, errors: errors);
-  }
-
 }
 
 class SyncResult {
@@ -134,10 +27,4 @@ class SyncResult {
   bool get hasErrors => errors.isNotEmpty;
 
   SyncResult({required this.pendingPushed, required this.errors});
-}
-
-class _PushResult {
-  final int pushed;
-  final List<String> errors;
-  _PushResult({required this.pushed, required this.errors});
 }
