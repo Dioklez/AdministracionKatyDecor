@@ -111,9 +111,10 @@ class ProjectDetailScreen extends StatelessWidget {
 
   Widget _buildProjectHeader() {
     final statusColors = <String, Color>{
-      'active': AppTheme.colorExito,
-      'paused': AppTheme.colorAdvertencia,
-      'completed': AppTheme.colorTextoSecundario,
+      'activo': AppTheme.colorExito,
+      'pausado': AppTheme.colorAdvertencia,
+      'completado': AppTheme.colorTextoSecundario,
+      'cancelado': AppTheme.colorError,
     };
     final statusColor =
         statusColors[project.status] ?? AppTheme.colorTextoSecundario;

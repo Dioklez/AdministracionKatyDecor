@@ -548,7 +548,7 @@ class _BudgetDialogState extends State<_BudgetDialog> {
   late TextEditingController _nameController;
   late TextEditingController _plannedController;
   late TextEditingController _actualController;
-  late TextEditingController _periodController;
+  String _period = 'mensual';
   late TextEditingController _notesController;
   String? _selectedCategoryId;
   String? _selectedProjectId;
@@ -568,7 +568,10 @@ class _BudgetDialogState extends State<_BudgetDialog> {
         text: b != null ? b.plannedAmount.toStringAsFixed(2) : '');
     _actualController = TextEditingController(
         text: b != null ? b.actualAmount.toStringAsFixed(2) : '0');
-    _periodController = TextEditingController(text: b?.period ?? '');
+    _period = ['mensual', 'trimestral', 'anual', 'proyecto']
+            .contains(b?.period)
+        ? b!.period!
+        : 'mensual';
     _notesController = TextEditingController(text: b?.notes ?? '');
     _selectedCategoryId = b?.categoryId;
     _selectedProjectId = b?.projectId;
@@ -581,7 +584,6 @@ class _BudgetDialogState extends State<_BudgetDialog> {
     _nameController.dispose();
     _plannedController.dispose();
     _actualController.dispose();
-    _periodController.dispose();
     _notesController.dispose();
     super.dispose();
   }
@@ -617,14 +619,14 @@ class _BudgetDialogState extends State<_BudgetDialog> {
     });
     final body = <String, dynamic>{
       'name': _nameController.text.trim(),
-      'plannedAmount':
+      'planned_amount':
           double.tryParse(_plannedController.text) ?? 0.0,
-      'actualAmount': double.tryParse(_actualController.text) ?? 0.0,
-      'categoryId': _selectedCategoryId ?? '',
-      'projectId': _selectedProjectId ?? '',
-      'period': _periodController.text.trim(),
-      'startDate': _startDate?.toIso8601String().substring(0, 10) ?? '',
-      'endDate': _endDate?.toIso8601String().substring(0, 10) ?? '',
+      'actual_amount': double.tryParse(_actualController.text) ?? 0.0,
+      'category': _selectedCategoryId ?? '',
+      'project': _selectedProjectId ?? '',
+      'period': _period,
+      'start_date': _startDate?.toIso8601String().substring(0, 10) ?? '',
+      'end_date': _endDate?.toIso8601String().substring(0, 10) ?? '',
       'notes': _notesController.text.trim(),
     };
     try {
@@ -708,11 +710,21 @@ class _BudgetDialogState extends State<_BudgetDialog> {
                 ),
                 const SizedBox(height: 10),
 
-                // Periodo + fechas
-                TextFormField(
-                  controller: _periodController,
-                  decoration: const InputDecoration(
-                      labelText: 'Periodo (opcional, ej: 2026-05)'),
+                // Periodo
+                DropdownButtonFormField<String>(
+                  value: _period,
+                  items: const [
+                    DropdownMenuItem(value: 'mensual', child: Text('Mensual')),
+                    DropdownMenuItem(
+                        value: 'trimestral', child: Text('Trimestral')),
+                    DropdownMenuItem(value: 'anual', child: Text('Anual')),
+                    DropdownMenuItem(
+                        value: 'proyecto', child: Text('Proyecto')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setState(() => _period = v);
+                  },
+                  decoration: const InputDecoration(labelText: 'Periodo'),
                 ),
                 const SizedBox(height: 10),
 

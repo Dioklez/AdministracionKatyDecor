@@ -4,7 +4,7 @@ class Transaction {
   final String id;
   final String description;
   final double amount;
-  final String type; // 'income' | 'expense'
+  final String type; // 'ingreso' | 'egreso'
   final String date; // 'YYYY-MM-DD'
   final String? projectId;
   final String? categoryId;
@@ -27,7 +27,7 @@ class Transaction {
     required this.updated,
   });
 
-  bool get isIncome => type == 'income';
+  bool get isIncome => type == 'ingreso';
 
   factory Transaction.fromRecord(RecordModel record) {
     final typeVal = record.getStringValue('type');
@@ -35,17 +35,17 @@ class Transaction {
       id: record.id,
       description: record.getStringValue('description'),
       amount: record.getDoubleValue('amount'),
-      type: typeVal.isEmpty ? 'expense' : typeVal,
+      type: typeVal.isEmpty ? 'egreso' : typeVal,
       date: record.getStringValue('date'),
-      projectId: record.getStringValue('projectId').isEmpty
+      projectId: record.getStringValue('project').isEmpty
           ? null
-          : record.getStringValue('projectId'),
-      categoryId: record.getStringValue('categoryId').isEmpty
+          : record.getStringValue('project'),
+      categoryId: record.getStringValue('category').isEmpty
           ? null
-          : record.getStringValue('categoryId'),
-      accountId: record.getStringValue('accountId').isEmpty
+          : record.getStringValue('category'),
+      accountId: record.getStringValue('account').isEmpty
           ? null
-          : record.getStringValue('accountId'),
+          : record.getStringValue('account'),
       notes: record.getStringValue('notes').isEmpty
           ? null
           : record.getStringValue('notes'),
@@ -59,9 +59,9 @@ class Transaction {
         'amount': amount,
         'type': type,
         'date': date,
-        'projectId': projectId ?? '',
-        'categoryId': categoryId ?? '',
-        'accountId': accountId ?? '',
+        'project': projectId ?? '',
+        'category': categoryId ?? '',
+        'account': accountId ?? '',
         'notes': notes ?? '',
       };
 }

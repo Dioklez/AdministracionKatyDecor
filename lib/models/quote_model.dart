@@ -8,7 +8,7 @@ class Quote {
   final String? clientPhone;
   final String? date; // 'YYYY-MM-DD'
   final String? validUntil; // 'YYYY-MM-DD'
-  final String status; // 'pendiente' | 'aprobada' | 'rechazada'
+  final String status; // 'borrador' | 'enviada' | 'aprobada' | 'rechazada' | 'cancelada'
   final double subtotal;
   final double tax;
   final double total;
@@ -37,9 +37,11 @@ class Quote {
 
   String get statusLabel =>
       const {
-        'pendiente': 'Pendiente',
+        'borrador': 'Borrador',
+        'enviada': 'Enviada',
         'aprobada': 'Aprobada',
         'rechazada': 'Rechazada',
+        'cancelada': 'Cancelada',
       }[status] ??
       status;
 
@@ -56,22 +58,22 @@ class Quote {
       folio: record.getStringValue('folio').isEmpty
           ? null
           : record.getStringValue('folio'),
-      projectId: record.getStringValue('projectId').isEmpty
+      projectId: record.getStringValue('project').isEmpty
           ? null
-          : record.getStringValue('projectId'),
-      clientName: record.getStringValue('clientName').isEmpty
+          : record.getStringValue('project'),
+      clientName: record.getStringValue('client_name').isEmpty
           ? null
-          : record.getStringValue('clientName'),
-      clientPhone: record.getStringValue('clientPhone').isEmpty
+          : record.getStringValue('client_name'),
+      clientPhone: record.getStringValue('client_phone').isEmpty
           ? null
-          : record.getStringValue('clientPhone'),
+          : record.getStringValue('client_phone'),
       date: record.getStringValue('date').isEmpty
           ? null
           : record.getStringValue('date'),
-      validUntil: record.getStringValue('validUntil').isEmpty
+      validUntil: record.getStringValue('valid_until').isEmpty
           ? null
-          : record.getStringValue('validUntil'),
-      status: statusVal.isEmpty ? 'pendiente' : statusVal,
+          : record.getStringValue('valid_until'),
+      status: statusVal.isEmpty ? 'borrador' : statusVal,
       subtotal: record.getDoubleValue('subtotal'),
       tax: record.getDoubleValue('tax'),
       total: record.getDoubleValue('total'),
@@ -86,11 +88,11 @@ class Quote {
 
   Map<String, dynamic> toJson() => {
         'folio': folio ?? '',
-        'projectId': projectId ?? '',
-        'clientName': clientName ?? '',
-        'clientPhone': clientPhone ?? '',
+        'project': projectId ?? '',
+        'client_name': clientName ?? '',
+        'client_phone': clientPhone ?? '',
         'date': date ?? '',
-        'validUntil': validUntil ?? '',
+        'valid_until': validUntil ?? '',
         'status': status,
         'subtotal': subtotal,
         'tax': tax,

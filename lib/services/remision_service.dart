@@ -12,8 +12,13 @@ class RemisionService {
   }
 
   Future<Remision> create(Map<String, dynamic> data) async {
-    final record = await _pb.collection('remisiones').create(body: data);
-    return Remision.fromRecord(record);
+    try {
+      final record = await _pb.collection('remisiones').create(body: data);
+      return Remision.fromRecord(record);
+    } catch (e) {
+      print('RemisionService.create error: $e');
+      rethrow;
+    }
   }
 
   Future<Remision> update(String id, Map<String, dynamic> data) async {

@@ -29,13 +29,13 @@ class Account {
       name: record.getStringValue('name'),
       type: record.getStringValue('type'),
       balance: (record.getDoubleValue('balance')),
-      bankName: record.getStringValue('bankName').isEmpty
+      bankName: record.getStringValue('bank_name').isEmpty
           ? null
-          : record.getStringValue('bankName'),
-      accountNumber: record.getStringValue('accountNumber').isEmpty
+          : record.getStringValue('bank_name'),
+      accountNumber: record.getStringValue('account_number').isEmpty
           ? null
-          : record.getStringValue('accountNumber'),
-      isActive: record.getBoolValue('isActive'),
+          : record.getStringValue('account_number'),
+      isActive: record.getBoolValue('is_active'),
       created: DateTime.parse(record.get<String>('created')),
       updated: DateTime.parse(record.get<String>('updated')),
     );
@@ -45,8 +45,8 @@ class Account {
         'name': name,
         'type': type,
         'balance': balance,
-        'bankName': bankName ?? '',
-        'accountNumber': accountNumber ?? '',
-        'isActive': isActive,
+        'bank_name': bankName ?? '',
+        'account_number': accountNumber ?? '',
+        'is_active': isActive,
       };
 }

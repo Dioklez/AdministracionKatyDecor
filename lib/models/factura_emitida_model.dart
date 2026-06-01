@@ -7,7 +7,7 @@ class FacturaEmitida {
   final String? clientName;
   final String? clientRfc;
   final String? date; // 'YYYY-MM-DD'
-  final String status; // 'pendiente' | 'pagada' | 'cancelada'
+  final String status; // 'borrador' | 'emitida' | 'cancelada'
   final double subtotal;
   final double tax;
   final double total;
@@ -35,8 +35,8 @@ class FacturaEmitida {
 
   String get statusLabel =>
       const {
-        'pendiente': 'Pendiente',
-        'pagada': 'Pagada',
+        'borrador': 'Borrador',
+        'emitida': 'Emitida',
         'cancelada': 'Cancelada',
       }[status] ??
       status;
@@ -54,19 +54,19 @@ class FacturaEmitida {
       folio: record.getStringValue('folio').isEmpty
           ? null
           : record.getStringValue('folio'),
-      projectId: record.getStringValue('projectId').isEmpty
+      projectId: record.getStringValue('project').isEmpty
           ? null
-          : record.getStringValue('projectId'),
-      clientName: record.getStringValue('clientName').isEmpty
+          : record.getStringValue('project'),
+      clientName: record.getStringValue('client_name').isEmpty
           ? null
-          : record.getStringValue('clientName'),
-      clientRfc: record.getStringValue('clientRfc').isEmpty
+          : record.getStringValue('client_name'),
+      clientRfc: record.getStringValue('client_rfc').isEmpty
           ? null
-          : record.getStringValue('clientRfc'),
+          : record.getStringValue('client_rfc'),
       date: record.getStringValue('date').isEmpty
           ? null
           : record.getStringValue('date'),
-      status: statusVal.isEmpty ? 'pendiente' : statusVal,
+      status: statusVal.isEmpty ? 'borrador' : statusVal,
       subtotal: record.getDoubleValue('subtotal'),
       tax: record.getDoubleValue('tax'),
       total: record.getDoubleValue('total'),
@@ -81,9 +81,9 @@ class FacturaEmitida {
 
   Map<String, dynamic> toJson() => {
         'folio': folio ?? '',
-        'projectId': projectId ?? '',
-        'clientName': clientName ?? '',
-        'clientRfc': clientRfc ?? '',
+        'project': projectId ?? '',
+        'client_name': clientName ?? '',
+        'client_rfc': clientRfc ?? '',
         'date': date ?? '',
         'status': status,
         'subtotal': subtotal,

@@ -13,7 +13,7 @@ class InventoryMovementService {
 
   Future<List<InventoryMovement>> getByItem(String inventoryItemId) async {
     final records = await _pb.collection('inventory_movements').getFullList(
-          filter: 'inventoryItemId = "$inventoryItemId"',
+          filter: 'inventory_item = "$inventoryItemId"',
           sort: '-date',
         );
     return records.map(InventoryMovement.fromRecord).toList();

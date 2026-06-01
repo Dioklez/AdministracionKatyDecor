@@ -74,7 +74,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _transactions = txnList;
           _activeProjects =
-              allProjects.where((p) => p.status == 'active').length;
+              allProjects.where((p) => p.status == 'activo').length;
           _chartData = MonthlyChartData.fromApiResponse(results[2]);
           _loading = false;
         });

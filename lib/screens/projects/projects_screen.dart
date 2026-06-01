@@ -81,10 +81,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       fontSize: 13, color: AppTheme.colorTextoSecundario),
                   items: const [
                     DropdownMenuItem(value: 'all', child: Text('Todos')),
-                    DropdownMenuItem(value: 'active', child: Text('Activos')),
-                    DropdownMenuItem(value: 'paused', child: Text('Pausados')),
+                    DropdownMenuItem(value: 'activo', child: Text('Activos')),
+                    DropdownMenuItem(value: 'pausado', child: Text('Pausados')),
                     DropdownMenuItem(
-                        value: 'completed', child: Text('Completados')),
+                        value: 'completado', child: Text('Completados')),
+                    DropdownMenuItem(
+                        value: 'cancelado', child: Text('Cancelados')),
                   ],
                   onChanged: (v) {
                     if (v != null) setState(() => _statusFilter = v);
@@ -289,12 +291,14 @@ class _ProjectCardState extends State<_ProjectCard> {
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'active':
+      case 'activo':
         return AppTheme.colorExito;
-      case 'paused':
+      case 'pausado':
         return AppTheme.colorAdvertencia;
-      case 'completed':
+      case 'completado':
         return AppTheme.colorTextoSecundario;
+      case 'cancelado':
+        return AppTheme.colorError;
       default:
         return AppTheme.colorTextoSecundario;
     }
@@ -490,7 +494,7 @@ class _ProjectDialogState extends State<_ProjectDialog> {
   final _phoneController = TextEditingController();
   final _descController = TextEditingController();
   final _notesController = TextEditingController();
-  String _status = 'active';
+  String _status = 'activo';
   String _color = '#C9A96E';
   bool _saving = false;
   String? _error;
@@ -541,9 +545,9 @@ class _ProjectDialogState extends State<_ProjectDialog> {
     });
     final body = <String, dynamic>{
       'name': _nameController.text.trim(),
-      'clientName': _clientController.text.trim(),
+      'client_name': _clientController.text.trim(),
       if (_phoneController.text.trim().isNotEmpty)
-        'clientPhone': _phoneController.text.trim(),
+        'client_phone': _phoneController.text.trim(),
       if (_descController.text.trim().isNotEmpty)
         'description': _descController.text.trim(),
       if (_notesController.text.trim().isNotEmpty)
@@ -624,10 +628,12 @@ class _ProjectDialogState extends State<_ProjectDialog> {
                 DropdownButtonFormField<String>(
                   value: _status,
                   items: const [
-                    DropdownMenuItem(value: 'active', child: Text('Activo')),
-                    DropdownMenuItem(value: 'paused', child: Text('Pausado')),
+                    DropdownMenuItem(value: 'activo', child: Text('Activo')),
+                    DropdownMenuItem(value: 'pausado', child: Text('Pausado')),
                     DropdownMenuItem(
-                        value: 'completed', child: Text('Completado')),
+                        value: 'completado', child: Text('Completado')),
+                    DropdownMenuItem(
+                        value: 'cancelado', child: Text('Cancelado')),
                   ],
                   onChanged: (v) {
                     if (v != null) setState(() => _status = v);

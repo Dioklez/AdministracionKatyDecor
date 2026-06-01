@@ -41,12 +41,14 @@ class Project {
 
   String get statusLabel {
     switch (status) {
-      case 'active':
+      case 'activo':
         return 'Activo';
-      case 'paused':
+      case 'pausado':
         return 'Pausado';
-      case 'completed':
+      case 'completado':
         return 'Completado';
+      case 'cancelado':
+        return 'Cancelado';
       default:
         return status;
     }
@@ -63,26 +65,26 @@ class Project {
 
   factory Project.fromRecord(RecordModel record) {
     final budgetVal = record.getDoubleValue('budget');
-    final startDateStr = record.getStringValue('startDate');
-    final endDateStr = record.getStringValue('endDate');
+    final startDateStr = record.getStringValue('start_date');
+    final endDateStr = record.getStringValue('end_date');
     return Project(
       id: record.id,
       name: record.getStringValue('name'),
-      clientName: record.getStringValue('clientName'),
-      clientPhone: record.getStringValue('clientPhone').isEmpty
+      clientName: record.getStringValue('client_name'),
+      clientPhone: record.getStringValue('client_phone').isEmpty
           ? null
-          : record.getStringValue('clientPhone'),
+          : record.getStringValue('client_phone'),
       description: record.getStringValue('description').isEmpty
           ? null
           : record.getStringValue('description'),
       status: record.getStringValue('status').isEmpty
-          ? 'active'
+          ? 'activo'
           : record.getStringValue('status'),
       startDate: startDateStr.isEmpty ? null : startDateStr,
       endDate: endDateStr.isEmpty ? null : endDateStr,
       budget: budgetVal == 0.0 ? null : budgetVal,
-      totalIncome: record.getDoubleValue('totalIncome'),
-      totalExpense: record.getDoubleValue('totalExpense'),
+      totalIncome: record.getDoubleValue('total_income'),
+      totalExpense: record.getDoubleValue('total_expense'),
       notes: record.getStringValue('notes').isEmpty
           ? null
           : record.getStringValue('notes'),
@@ -99,12 +101,12 @@ class Project {
   Map<String, dynamic> toJson() {
     return {
       'name': name,
-      'clientName': clientName,
-      if (clientPhone != null) 'clientPhone': clientPhone,
+      'client_name': clientName,
+      if (clientPhone != null) 'client_phone': clientPhone,
       if (description != null) 'description': description,
       'status': status,
-      if (startDate != null) 'startDate': startDate,
-      if (endDate != null) 'endDate': endDate,
+      if (startDate != null) 'start_date': startDate,
+      if (endDate != null) 'end_date': endDate,
       if (budget != null) 'budget': budget,
       if (notes != null) 'notes': notes,
       if (color != null) 'color': color,

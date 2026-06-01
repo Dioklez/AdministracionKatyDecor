@@ -12,8 +12,13 @@ class BudgetService {
   }
 
   Future<Budget> create(Map<String, dynamic> data) async {
-    final record = await _pb.collection('budgets').create(body: data);
-    return Budget.fromRecord(record);
+    try {
+      final record = await _pb.collection('budgets').create(body: data);
+      return Budget.fromRecord(record);
+    } catch (e) {
+      print('BudgetService.create error: $e');
+      rethrow;
+    }
   }
 
   Future<Budget> update(String id, Map<String, dynamic> data) async {

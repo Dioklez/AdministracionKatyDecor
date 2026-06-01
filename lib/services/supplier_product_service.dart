@@ -13,16 +13,21 @@ class SupplierProductService {
 
   Future<List<SupplierProduct>> getBySupplier(String supplierId) async {
     final records = await _pb.collection('supplier_products').getFullList(
-          filter: 'supplierId = "$supplierId"',
+          filter: 'supplier = "$supplierId"',
           sort: 'name',
         );
     return records.map(SupplierProduct.fromRecord).toList();
   }
 
   Future<SupplierProduct> create(Map<String, dynamic> data) async {
-    final record =
-        await _pb.collection('supplier_products').create(body: data);
-    return SupplierProduct.fromRecord(record);
+    try {
+      final record =
+          await _pb.collection('supplier_products').create(body: data);
+      return SupplierProduct.fromRecord(record);
+    } catch (e) {
+      print('SupplierProductService.create error: $e');
+      rethrow;
+    }
   }
 
   Future<SupplierProduct> update(String id, Map<String, dynamic> data) async {

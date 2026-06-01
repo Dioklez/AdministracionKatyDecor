@@ -554,7 +554,7 @@ class _QuoteDialogState extends State<_QuoteDialog> {
         text: q != null ? q.total.toStringAsFixed(2) : '');
     _notesController = TextEditingController(text: q?.notes ?? '');
     _selectedProjectId = q?.projectId;
-    _status = q?.status ?? 'pendiente';
+    _status = q?.status ?? 'borrador';
     _date = q?.date != null ? DateTime.tryParse(q!.date!) : null;
     _validUntil =
         q?.validUntil != null ? DateTime.tryParse(q!.validUntil!) : null;
@@ -610,11 +610,11 @@ class _QuoteDialogState extends State<_QuoteDialog> {
     });
     final body = <String, dynamic>{
       'folio': _folioController.text.trim(),
-      'clientName': _clientNameController.text.trim(),
-      'clientPhone': _clientPhoneController.text.trim(),
-      'projectId': _selectedProjectId ?? '',
+      'client_name': _clientNameController.text.trim(),
+      'client_phone': _clientPhoneController.text.trim(),
+      'project': _selectedProjectId ?? '',
       'date': _date?.toIso8601String().substring(0, 10) ?? '',
-      'validUntil': _validUntil?.toIso8601String().substring(0, 10) ?? '',
+      'valid_until': _validUntil?.toIso8601String().substring(0, 10) ?? '',
       'status': _status,
       'subtotal': double.tryParse(_subtotalController.text) ?? 0.0,
       'tax': double.tryParse(_taxController.text) ?? 0.0,
@@ -796,11 +796,15 @@ class _QuoteDialogState extends State<_QuoteDialog> {
                   value: _status,
                   items: const [
                     DropdownMenuItem(
-                        value: 'pendiente', child: Text('Pendiente')),
+                        value: 'borrador', child: Text('Borrador')),
+                    DropdownMenuItem(
+                        value: 'enviada', child: Text('Enviada')),
                     DropdownMenuItem(
                         value: 'aprobada', child: Text('Aprobada')),
                     DropdownMenuItem(
                         value: 'rechazada', child: Text('Rechazada')),
+                    DropdownMenuItem(
+                        value: 'cancelada', child: Text('Cancelada')),
                   ],
                   onChanged: (v) {
                     if (v != null) setState(() => _status = v);

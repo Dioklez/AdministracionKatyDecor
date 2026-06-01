@@ -6,7 +6,7 @@ class Remision {
   final String? projectId;
   final String? supplierId;
   final String? date; // 'YYYY-MM-DD'
-  final String status; // 'pendiente' | 'entregada' | 'cancelada'
+  final String status; // 'pendiente' | 'recibida' | 'cancelada'
   final double subtotal;
   final double tax;
   final double total;
@@ -34,7 +34,7 @@ class Remision {
   String get statusLabel =>
       const {
         'pendiente': 'Pendiente',
-        'entregada': 'Entregada',
+        'recibida': 'Recibida',
         'cancelada': 'Cancelada',
       }[status] ??
       status;
@@ -52,12 +52,12 @@ class Remision {
       folio: record.getStringValue('folio').isEmpty
           ? null
           : record.getStringValue('folio'),
-      projectId: record.getStringValue('projectId').isEmpty
+      projectId: record.getStringValue('project').isEmpty
           ? null
-          : record.getStringValue('projectId'),
-      supplierId: record.getStringValue('supplierId').isEmpty
+          : record.getStringValue('project'),
+      supplierId: record.getStringValue('supplier').isEmpty
           ? null
-          : record.getStringValue('supplierId'),
+          : record.getStringValue('supplier'),
       date: record.getStringValue('date').isEmpty
           ? null
           : record.getStringValue('date'),
@@ -76,8 +76,8 @@ class Remision {
 
   Map<String, dynamic> toJson() => {
         'folio': folio ?? '',
-        'projectId': projectId ?? '',
-        'supplierId': supplierId ?? '',
+        'project': projectId ?? '',
+        'supplier': supplierId ?? '',
         'date': date ?? '',
         'status': status,
         'subtotal': subtotal,

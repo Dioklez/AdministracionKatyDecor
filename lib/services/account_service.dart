@@ -12,8 +12,13 @@ class AccountService {
   }
 
   Future<Account> create(Map<String, dynamic> data) async {
-    final record = await _pb.collection('accounts').create(body: data);
-    return Account.fromRecord(record);
+    try {
+      final record = await _pb.collection('accounts').create(body: data);
+      return Account.fromRecord(record);
+    } catch (e) {
+      print('AccountService.create error: $e');
+      rethrow;
+    }
   }
 
   Future<Account> update(String id, Map<String, dynamic> data) async {

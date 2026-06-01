@@ -13,7 +13,7 @@ class AccountPaymentService {
 
   Future<List<AccountPayment>> getByAccount(String accountId) async {
     final records = await _pb.collection('account_payments').getFullList(
-          filter: "accountId='$accountId'",
+          filter: "account='$accountId'",
           sort: '-date',
         );
     return records.map(AccountPayment.fromRecord).toList();

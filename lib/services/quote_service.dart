@@ -12,8 +12,13 @@ class QuoteService {
   }
 
   Future<Quote> create(Map<String, dynamic> data) async {
-    final record = await _pb.collection('quotes').create(body: data);
-    return Quote.fromRecord(record);
+    try {
+      final record = await _pb.collection('quotes').create(body: data);
+      return Quote.fromRecord(record);
+    } catch (e) {
+      print('QuoteService.create error: $e');
+      rethrow;
+    }
   }
 
   Future<Quote> update(String id, Map<String, dynamic> data) async {

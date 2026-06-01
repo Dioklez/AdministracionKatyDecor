@@ -38,23 +38,23 @@ class Budget {
     return Budget(
       id: record.id,
       name: record.getStringValue('name'),
-      projectId: record.getStringValue('projectId').isEmpty
+      projectId: record.getStringValue('project').isEmpty
           ? null
-          : record.getStringValue('projectId'),
+          : record.getStringValue('project'),
       period: record.getStringValue('period').isEmpty
           ? null
           : record.getStringValue('period'),
-      startDate: record.getStringValue('startDate').isEmpty
+      startDate: record.getStringValue('start_date').isEmpty
           ? null
-          : record.getStringValue('startDate'),
-      endDate: record.getStringValue('endDate').isEmpty
+          : record.getStringValue('start_date'),
+      endDate: record.getStringValue('end_date').isEmpty
           ? null
-          : record.getStringValue('endDate'),
-      plannedAmount: record.getDoubleValue('plannedAmount'),
-      actualAmount: record.getDoubleValue('actualAmount'),
-      categoryId: record.getStringValue('categoryId').isEmpty
+          : record.getStringValue('end_date'),
+      plannedAmount: record.getDoubleValue('planned_amount'),
+      actualAmount: record.getDoubleValue('actual_amount'),
+      categoryId: record.getStringValue('category').isEmpty
           ? null
-          : record.getStringValue('categoryId'),
+          : record.getStringValue('category'),
       notes: record.getStringValue('notes').isEmpty
           ? null
           : record.getStringValue('notes'),
@@ -65,13 +65,13 @@ class Budget {
 
   Map<String, dynamic> toJson() => {
         'name': name,
-        'projectId': projectId ?? '',
+        'project': projectId ?? '',
         'period': period ?? '',
-        'startDate': startDate ?? '',
-        'endDate': endDate ?? '',
-        'plannedAmount': plannedAmount,
-        'actualAmount': actualAmount,
-        'categoryId': categoryId ?? '',
+        'start_date': startDate ?? '',
+        'end_date': endDate ?? '',
+        'planned_amount': plannedAmount,
+        'actual_amount': actualAmount,
+        'category': categoryId ?? '',
         'notes': notes ?? '',
       };
 }

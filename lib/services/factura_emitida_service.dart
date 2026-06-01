@@ -12,9 +12,14 @@ class FacturaEmitidaService {
   }
 
   Future<FacturaEmitida> create(Map<String, dynamic> data) async {
-    final record =
-        await _pb.collection('facturas_emitidas').create(body: data);
-    return FacturaEmitida.fromRecord(record);
+    try {
+      final record =
+          await _pb.collection('facturas_emitidas').create(body: data);
+      return FacturaEmitida.fromRecord(record);
+    } catch (e) {
+      print('FacturaEmitidaService.create error: $e');
+      rethrow;
+    }
   }
 
   Future<FacturaEmitida> update(String id, Map<String, dynamic> data) async {

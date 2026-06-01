@@ -554,7 +554,7 @@ class _TransactionDialogState extends State<_TransactionDialog> {
   void initState() {
     super.initState();
     final t = widget.transaction;
-    _type = t?.type ?? 'expense';
+    _type = t?.type ?? 'egreso';
     _descController = TextEditingController(text: t?.description ?? '');
     _amountController =
         TextEditingController(text: t != null ? t.amount.toStringAsFixed(2) : '');
@@ -646,9 +646,9 @@ class _TransactionDialogState extends State<_TransactionDialog> {
                       child: _TypeButton(
                         label: 'Egreso',
                         icon: Icons.arrow_upward_outlined,
-                        selected: _type == 'expense',
+                        selected: _type == 'egreso',
                         color: AppTheme.colorError,
-                        onTap: () => setState(() => _type = 'expense'),
+                        onTap: () => setState(() => _type = 'egreso'),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -656,9 +656,9 @@ class _TransactionDialogState extends State<_TransactionDialog> {
                       child: _TypeButton(
                         label: 'Ingreso',
                         icon: Icons.arrow_downward_outlined,
-                        selected: _type == 'income',
+                        selected: _type == 'ingreso',
                         color: AppTheme.colorExito,
-                        onTap: () => setState(() => _type = 'income'),
+                        onTap: () => setState(() => _type = 'ingreso'),
                       ),
                     ),
                   ],

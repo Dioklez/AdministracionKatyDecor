@@ -29,9 +29,9 @@ class Supplier {
     return Supplier(
       id: record.id,
       name: record.getStringValue('name'),
-      contactName: record.getStringValue('contactName').isEmpty
+      contactName: record.getStringValue('contact_name').isEmpty
           ? null
-          : record.getStringValue('contactName'),
+          : record.getStringValue('contact_name'),
       phone: record.getStringValue('phone').isEmpty
           ? null
           : record.getStringValue('phone'),
@@ -44,7 +44,7 @@ class Supplier {
       notes: record.getStringValue('notes').isEmpty
           ? null
           : record.getStringValue('notes'),
-      isActive: record.getBoolValue('isActive'),
+      isActive: record.getBoolValue('is_active'),
       created: DateTime.parse(record.get<String>('created')),
       updated: DateTime.parse(record.get<String>('updated')),
     );
@@ -52,11 +52,11 @@ class Supplier {
 
   Map<String, dynamic> toJson() => {
         'name': name,
-        'contactName': contactName ?? '',
+        'contact_name': contactName ?? '',
         'phone': phone ?? '',
         'email': email ?? '',
         'address': address ?? '',
         'notes': notes ?? '',
-        'isActive': isActive,
+        'is_active': isActive,
       };
 }

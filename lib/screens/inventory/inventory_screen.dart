@@ -832,11 +832,10 @@ class _ItemDialogState extends State<_ItemDialog> {
       _saving = true;
       _error = null;
     });
-    final minStock = double.tryParse(_minStockController.text.trim());
     final data = {
       'name': _nameController.text.trim(),
       'unit': _unitController.text.trim(),
-      'minStock': minStock,
+      'min_stock': double.tryParse(_minStockController.text.trim()) ?? 0,
       'location': _locationController.text.trim(),
       'description': _descriptionController.text.trim(),
       'notes': _notesController.text.trim(),
@@ -897,7 +896,7 @@ class _ItemDialogState extends State<_ItemDialog> {
                         controller: _minStockController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
-                            labelText: 'Stock mínimo (alerta)'),
+                            labelText: 'Stock mínimo'),
                       ),
                     ),
                   ],
@@ -1032,15 +1031,36 @@ class _MovementDialogState extends State<_MovementDialog> {
       return;
     }
     try {
+      final itemId = widget.item.id;
+
+      // 1. Registrar movimiento
       await InventoryMovementService().create({
-        'inventoryItemId': widget.item.id,
+        'inventory_item': itemId,
         'type': _type,
         'quantity': quantity,
         'date': _date.toIso8601String().substring(0, 10),
         'notes': _notesController.text.trim(),
       });
+
+      // 2. Recalcular stock desde todos los movimientos
+      final movements = await InventoryMovementService().getByItem(itemId);
+      double newStock = 0;
+      for (final m in movements) {
+        if (m.type == 'salida') {
+          newStock -= m.quantity;
+        } else {
+          // entrada y ajuste suman (ajuste puede venir negativo)
+          newStock += m.quantity;
+        }
+      }
+
+      // 3. Actualizar current_stock en PocketBase
+      await InventoryItemService().update(itemId, {'current_stock': newStock});
+
+      // 4. Refrescar UI
       if (mounted) widget.onSaved();
     } catch (e) {
+      print('InventoryMovementService.create error: $e');
       if (mounted) {
         setState(() {
           _error = 'No se pudo registrar el movimiento.';

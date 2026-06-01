@@ -17,16 +17,31 @@ class ProjectService {
   }
 
   Future<Project> create(Map<String, dynamic> data) async {
-    final record = await _pb.collection('projects').create(body: data);
-    return Project.fromRecord(record);
+    try {
+      final record = await _pb.collection('projects').create(body: data);
+      return Project.fromRecord(record);
+    } catch (e) {
+      print('ProjectService.create error: $e');
+      rethrow;
+    }
   }
 
   Future<Project> update(String id, Map<String, dynamic> data) async {
-    final record = await _pb.collection('projects').update(id, body: data);
-    return Project.fromRecord(record);
+    try {
+      final record = await _pb.collection('projects').update(id, body: data);
+      return Project.fromRecord(record);
+    } catch (e) {
+      print('ProjectService.update error: $e');
+      rethrow;
+    }
   }
 
   Future<void> delete(String id) async {
-    await _pb.collection('projects').delete(id);
+    try {
+      await _pb.collection('projects').delete(id);
+    } catch (e) {
+      print('ProjectService.delete error: $e');
+      rethrow;
+    }
   }
 }

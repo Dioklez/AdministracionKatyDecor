@@ -491,6 +491,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
         onSaved: () {
           Navigator.of(ctx).pop();
           _loadSuppliers();
+          if (_selectedId != null) _loadProducts(_selectedId!);
         },
       ),
     );
@@ -751,13 +752,13 @@ class _SupplierProductDialogState extends State<_SupplierProductDialog> {
     });
     final price = double.tryParse(_priceController.text.trim()) ?? 0.0;
     final data = {
-      'supplierId': widget.supplierId,
+      'supplier': widget.supplierId,
       'name': _nameController.text.trim(),
       'sku': _skuController.text.trim(),
       'unit': _unitController.text.trim(),
       'price': price,
       'description': _descriptionController.text.trim(),
-      'isActive': _isActive,
+      'is_active': _isActive,
     };
     try {
       if (_isEditing) {

@@ -27,7 +27,7 @@ class SupplierProduct {
 
   factory SupplierProduct.fromRecord(RecordModel record) => SupplierProduct(
         id: record.id,
-        supplierId: record.getStringValue('supplierId'),
+        supplierId: record.getStringValue('supplier'),
         name: record.getStringValue('name'),
         description: record.getStringValue('description').isEmpty
             ? null
@@ -39,18 +39,18 @@ class SupplierProduct {
             ? null
             : record.getStringValue('unit'),
         price: record.getDoubleValue('price'),
-        isActive: record.getBoolValue('isActive'),
+        isActive: record.getBoolValue('is_active'),
         created: DateTime.parse(record.get<String>('created')),
         updated: DateTime.parse(record.get<String>('updated')),
       );
 
   Map<String, dynamic> toJson() => {
-        'supplierId': supplierId,
+        'supplier': supplierId,
         'name': name,
         'description': description,
         'sku': sku,
         'unit': unit,
         'price': price,
-        'isActive': isActive,
+        'is_active': isActive,
       };
 }

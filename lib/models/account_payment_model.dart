@@ -5,10 +5,10 @@ class AccountPayment {
   final String accountId;
   final String? description;
   final double amount;
-  final String type; // 'cobro' | 'pago' | 'abono'
+  final String type; // 'cobro' | 'pago'
   final String? date; // 'YYYY-MM-DD'
   final String? projectId;
-  final String status; // 'pendiente' | 'pagado' | 'vencido'
+  final String status; // 'pendiente' | 'pagado' | 'cancelado'
   final String? dueDate; // 'YYYY-MM-DD'
   final String? notes;
   final DateTime created;
@@ -33,7 +33,6 @@ class AccountPayment {
       const {
         'cobro': 'Cobro',
         'pago': 'Pago',
-        'abono': 'Abono',
       }[type] ??
       type;
 
@@ -41,7 +40,7 @@ class AccountPayment {
       const {
         'pendiente': 'Pendiente',
         'pagado': 'Pagado',
-        'vencido': 'Vencido',
+        'cancelado': 'Cancelado',
       }[status] ??
       status;
 
@@ -51,7 +50,7 @@ class AccountPayment {
 
     return AccountPayment(
       id: record.id,
-      accountId: record.getStringValue('accountId'),
+      accountId: record.getStringValue('account'),
       description: record.getStringValue('description').isEmpty
           ? null
           : record.getStringValue('description'),
@@ -60,13 +59,13 @@ class AccountPayment {
       date: record.getStringValue('date').isEmpty
           ? null
           : record.getStringValue('date'),
-      projectId: record.getStringValue('projectId').isEmpty
+      projectId: record.getStringValue('project').isEmpty
           ? null
-          : record.getStringValue('projectId'),
+          : record.getStringValue('project'),
       status: statusVal.isEmpty ? 'pendiente' : statusVal,
-      dueDate: record.getStringValue('dueDate').isEmpty
+      dueDate: record.getStringValue('due_date').isEmpty
           ? null
-          : record.getStringValue('dueDate'),
+          : record.getStringValue('due_date'),
       notes: record.getStringValue('notes').isEmpty
           ? null
           : record.getStringValue('notes'),
@@ -76,14 +75,14 @@ class AccountPayment {
   }
 
   Map<String, dynamic> toJson() => {
-        'accountId': accountId,
+        'account': accountId,
         'description': description ?? '',
         'amount': amount,
         'type': type,
         'date': date ?? '',
-        'projectId': projectId ?? '',
+        'project': projectId ?? '',
         'status': status,
-        'dueDate': dueDate ?? '',
+        'due_date': dueDate ?? '',
         'notes': notes ?? '',
       };
 }

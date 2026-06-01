@@ -73,15 +73,18 @@ class _AccountsScreenState extends State<AccountsScreen> {
   }
 
   Future<void> _loadPayments(String accountId) async {
+    print('_loadPayments llamado para: $accountId');
     setState(() => _loadingPayments = true);
     try {
       final payments = await AccountPaymentService().getByAccount(accountId);
+      print('Pagos encontrados: ${payments.length}');
       if (!mounted) return;
       setState(() {
         _payments = payments;
         _loadingPayments = false;
       });
     } catch (e) {
+      print('_loadPayments error: $e');
       if (mounted) setState(() => _loadingPayments = false);
     }
   }
@@ -772,7 +775,7 @@ class _AccountDialog extends StatefulWidget {
 class _AccountDialogState extends State<_AccountDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _typeController = TextEditingController();
+  String _type = 'efectivo';
   final _balanceController = TextEditingController();
   final _bankNameController = TextEditingController();
   final _accountNumberController = TextEditingController();
@@ -788,7 +791,9 @@ class _AccountDialogState extends State<_AccountDialog> {
     final a = widget.editAccount;
     if (a != null) {
       _nameController.text = a.name;
-      _typeController.text = a.type;
+      _type = ['efectivo', 'banco', 'tarjeta', 'otro'].contains(a.type)
+          ? a.type
+          : 'efectivo';
       _balanceController.text = a.balance.toStringAsFixed(2);
       _bankNameController.text = a.bankName ?? '';
       _accountNumberController.text = a.accountNumber ?? '';
@@ -799,7 +804,6 @@ class _AccountDialogState extends State<_AccountDialog> {
   @override
   void dispose() {
     _nameController.dispose();
-    _typeController.dispose();
     _balanceController.dispose();
     _bankNameController.dispose();
     _accountNumberController.dispose();
@@ -814,11 +818,11 @@ class _AccountDialogState extends State<_AccountDialog> {
     });
     final data = {
       'name': _nameController.text.trim(),
-      'type': _typeController.text.trim(),
+      'type': _type,
       'balance': double.parse(_balanceController.text),
-      'bankName': _bankNameController.text.trim(),
-      'accountNumber': _accountNumberController.text.trim(),
-      'isActive': _isActive,
+      'bank_name': _bankNameController.text.trim(),
+      'account_number': _accountNumberController.text.trim(),
+      'is_active': _isActive,
     };
     try {
       if (_isEditing) {
@@ -862,12 +866,18 @@ class _AccountDialogState extends State<_AccountDialog> {
                       v == null || v.trim().isEmpty ? 'Requerido' : null,
                 ),
                 const SizedBox(height: 10),
-                TextFormField(
-                  controller: _typeController,
-                  decoration: const InputDecoration(
-                      labelText: 'Tipo (ej. Efectivo, Débito, Crédito) *'),
-                  validator: (v) =>
-                      v == null || v.trim().isEmpty ? 'Requerido' : null,
+                DropdownButtonFormField<String>(
+                  value: _type,
+                  items: const [
+                    DropdownMenuItem(value: 'efectivo', child: Text('Efectivo')),
+                    DropdownMenuItem(value: 'banco', child: Text('Banco')),
+                    DropdownMenuItem(value: 'tarjeta', child: Text('Tarjeta')),
+                    DropdownMenuItem(value: 'otro', child: Text('Otro')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setState(() => _type = v);
+                  },
+                  decoration: const InputDecoration(labelText: 'Tipo *'),
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
@@ -1157,13 +1167,13 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       _error = null;
     });
     final body = <String, dynamic>{
-      'accountId': widget.account.id,
+      'account': widget.account.id,
       'description': _descCtrl.text.trim(),
       'amount': double.tryParse(_amountCtrl.text) ?? 0.0,
       'type': _type,
       'date': _date?.toIso8601String().substring(0, 10) ?? '',
       'status': _status,
-      'dueDate': _dueDate?.toIso8601String().substring(0, 10) ?? '',
+      'due_date': _dueDate?.toIso8601String().substring(0, 10) ?? '',
       'notes': _notesCtrl.text.trim(),
     };
     try {
@@ -1173,8 +1183,10 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       } else {
         await svc.create(body);
       }
+      print('Pago creado exitosamente, llamando _loadPayments');
       if (mounted) widget.onSaved();
     } catch (e) {
+      print('AccountPaymentService.create error: $e');
       if (mounted) {
         setState(() {
           _error = _isEditing

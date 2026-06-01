@@ -38,13 +38,13 @@ class InventoryItem {
         unit: record.getStringValue('unit').isEmpty
             ? null
             : record.getStringValue('unit'),
-        currentStock: record.getDoubleValue('currentStock'),
-        minStock: record.getStringValue('minStock').isEmpty
+        currentStock: record.getDoubleValue('current_stock'),
+        minStock: record.getStringValue('min_stock').isEmpty
             ? null
-            : record.getDoubleValue('minStock'),
-        supplierProductId: record.getStringValue('supplierProductId').isEmpty
+            : record.getDoubleValue('min_stock'),
+        supplierProductId: record.getStringValue('supplier_product').isEmpty
             ? null
-            : record.getStringValue('supplierProductId'),
+            : record.getStringValue('supplier_product'),
         location: record.getStringValue('location').isEmpty
             ? null
             : record.getStringValue('location'),
@@ -59,9 +59,9 @@ class InventoryItem {
         'name': name,
         'description': description,
         'unit': unit,
-        'currentStock': currentStock,
-        'minStock': minStock,
-        'supplierProductId': supplierProductId,
+        'current_stock': currentStock,
+        'min_stock': minStock,
+        'supplier_product': supplierProductId,
         'location': location,
         'notes': notes,
       };

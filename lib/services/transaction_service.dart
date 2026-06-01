@@ -20,17 +20,32 @@ class TransactionService {
   }
 
   Future<Transaction> create(Map<String, dynamic> data) async {
-    final record = await _pb.collection('transactions').create(body: data);
-    return Transaction.fromRecord(record);
+    try {
+      final record = await _pb.collection('transactions').create(body: data);
+      return Transaction.fromRecord(record);
+    } catch (e) {
+      print('TransactionService.create error: $e');
+      rethrow;
+    }
   }
 
   Future<Transaction> update(String id, Map<String, dynamic> data) async {
-    final record =
-        await _pb.collection('transactions').update(id, body: data);
-    return Transaction.fromRecord(record);
+    try {
+      final record =
+          await _pb.collection('transactions').update(id, body: data);
+      return Transaction.fromRecord(record);
+    } catch (e) {
+      print('TransactionService.update error: $e');
+      rethrow;
+    }
   }
 
   Future<void> delete(String id) async {
-    await _pb.collection('transactions').delete(id);
+    try {
+      await _pb.collection('transactions').delete(id);
+    } catch (e) {
+      print('TransactionService.delete error: $e');
+      rethrow;
+    }
   }
 }

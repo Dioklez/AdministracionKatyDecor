@@ -114,7 +114,7 @@ class _TasksScreenState extends State<TasksScreen> {
   Future<void> _toggleTask(Task task) async {
     try {
       await _taskService.update(task.id, {
-        'status': task.isCompleted ? 'pending' : 'completed',
+        'status': task.isCompleted ? 'pendiente' : 'completado',
       });
       await _loadData();
     } catch (_) {
@@ -570,10 +570,10 @@ class _PriorityBadge extends StatelessWidget {
     Color color;
     String label;
     switch (priority) {
-      case 'high':
+      case 'alta':
         color = AppTheme.colorError;
         label = 'Alta';
-      case 'low':
+      case 'baja':
         color = AppTheme.colorTextoSecundario;
         label = 'Baja';
       default:
@@ -621,7 +621,7 @@ class _TaskDialogState extends State<_TaskDialog> {
   final _notesController = TextEditingController();
   DateTime? _dueDate;
   String? _selectedProjectId;
-  String _priority = 'medium';
+  String _priority = 'media';
   bool _saving = false;
   String? _error;
 
@@ -683,7 +683,7 @@ class _TaskDialogState extends State<_TaskDialog> {
       if (_isEditing) {
         await service.update(widget.editTask!.id, body);
       } else {
-        body['status'] = 'pending';
+        body['status'] = 'pendiente';
         await service.create(body);
       }
       if (mounted) widget.onSaved();
@@ -755,9 +755,9 @@ class _TaskDialogState extends State<_TaskDialog> {
                 DropdownButtonFormField<String>(
                   value: _priority,
                   items: const [
-                    DropdownMenuItem(value: 'low', child: Text('Baja')),
-                    DropdownMenuItem(value: 'medium', child: Text('Media')),
-                    DropdownMenuItem(value: 'high', child: Text('Alta')),
+                    DropdownMenuItem(value: 'baja', child: Text('Baja')),
+                    DropdownMenuItem(value: 'media', child: Text('Media')),
+                    DropdownMenuItem(value: 'alta', child: Text('Alta')),
                   ],
                   onChanged: (v) {
                     if (v != null) setState(() => _priority = v);

@@ -25,7 +25,7 @@ class InventoryMovement {
 
   factory InventoryMovement.fromRecord(RecordModel record) => InventoryMovement(
         id: record.id,
-        inventoryItemId: record.getStringValue('inventoryItemId'),
+        inventoryItemId: record.getStringValue('inventory_item'),
         type: record.getStringValue('type').isEmpty
             ? 'entrada'
             : record.getStringValue('type'),
@@ -33,9 +33,9 @@ class InventoryMovement {
         date: record.getStringValue('date').isEmpty
             ? null
             : record.getStringValue('date'),
-        projectId: record.getStringValue('projectId').isEmpty
+        projectId: record.getStringValue('project').isEmpty
             ? null
-            : record.getStringValue('projectId'),
+            : record.getStringValue('project'),
         notes: record.getStringValue('notes').isEmpty
             ? null
             : record.getStringValue('notes'),
@@ -44,11 +44,11 @@ class InventoryMovement {
       );
 
   Map<String, dynamic> toJson() => {
-        'inventoryItemId': inventoryItemId,
+        'inventory_item': inventoryItemId,
         'type': type,
         'quantity': quantity,
         'date': date,
-        'projectId': projectId,
+        'project': projectId,
         'notes': notes,
       };
 }

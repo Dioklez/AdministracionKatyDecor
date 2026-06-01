@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/remision_service.dart';
+import '../../services/project_service.dart';
+import '../../services/supplier_service.dart';
 import '../../models/remision_model.dart';
+import '../../models/project_model.dart';
+import '../../models/supplier_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
@@ -15,6 +19,8 @@ class RemisionesScreen extends StatefulWidget {
 
 class _RemisionesScreenState extends State<RemisionesScreen> {
   List<Remision> _all = [];
+  List<Project> _projects = [];
+  List<Supplier> _suppliers = [];
   bool _loading = true;
   String? _error;
 
@@ -33,13 +39,21 @@ class _RemisionesScreenState extends State<RemisionesScreen> {
       _error = null;
     });
     try {
-      final list = await RemisionService().getAll();
+      final futures = <Future>[
+        RemisionService().getAll(),
+        if (_projects.isEmpty) ProjectService().getAll(),
+        if (_suppliers.isEmpty) SupplierService().getAll(),
+      ];
+      final results = await Future.wait(futures);
       if (!mounted) return;
+      int idx = 0;
+      final list = results[idx++] as List<Remision>;
+      if (_projects.isEmpty) _projects = results[idx++] as List<Project>;
+      if (_suppliers.isEmpty) _suppliers = results[idx++] as List<Supplier>;
       setState(() {
         _all = list;
         _loading = false;
-        if (_selectedId != null &&
-            !list.any((r) => r.id == _selectedId)) {
+        if (_selectedId != null && !list.any((r) => r.id == _selectedId)) {
           _selectedId = null;
         }
       });
@@ -62,6 +76,12 @@ class _RemisionesScreenState extends State<RemisionesScreen> {
       _selectedId == null
           ? null
           : _all.where((r) => r.id == _selectedId).firstOrNull;
+
+  String _projectName(String? id) =>
+      id == null ? '' : (_projects.where((p) => p.id == id).firstOrNull?.name ?? id);
+
+  String _supplierName(String? id) =>
+      id == null ? '' : (_suppliers.where((s) => s.id == id).firstOrNull?.name ?? id);
 
   @override
   Widget build(BuildContext context) {
@@ -168,10 +188,10 @@ class _RemisionesScreenState extends State<RemisionesScreen> {
             ),
             const SizedBox(width: 6),
             _TabBtn(
-              label: 'Entregadas',
+              label: 'Recibidas',
               color: AppTheme.colorExito,
-              selected: _statusFilter == 'entregada',
-              onTap: () => setState(() => _statusFilter = 'entregada'),
+              selected: _statusFilter == 'recibida',
+              onTap: () => setState(() => _statusFilter = 'recibida'),
             ),
             const SizedBox(width: 6),
             _TabBtn(
@@ -268,9 +288,9 @@ class _RemisionesScreenState extends State<RemisionesScreen> {
               if (r.date != null)
                 _InfoCell(label: 'Fecha', value: _fmtDate(r.date)),
               if (r.projectId != null)
-                _InfoCell(label: 'Proyecto', value: r.projectId!),
+                _InfoCell(label: 'Proyecto', value: _projectName(r.projectId)),
               if (r.supplierId != null)
-                _InfoCell(label: 'Proveedor', value: r.supplierId!),
+                _InfoCell(label: 'Proveedor', value: _supplierName(r.supplierId)),
               _InfoCell(
                   label: 'Subtotal', value: _fmtMoney(r.subtotal)),
               _InfoCell(label: 'IVA', value: _fmtMoney(r.tax)),
@@ -316,7 +336,7 @@ class _RemisionesScreenState extends State<RemisionesScreen> {
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'entregada':
+      case 'recibida':
         return AppTheme.colorExito;
       case 'cancelada':
         return AppTheme.colorError;
@@ -352,6 +372,8 @@ class _RemisionesScreenState extends State<RemisionesScreen> {
     showDialog(
       context: context,
       builder: (ctx) => _RemisionDialog(
+        projects: _projects,
+        suppliers: _suppliers,
         editRemision: edit,
         onSaved: () {
           Navigator.of(ctx).pop();
@@ -476,7 +498,7 @@ class _RemisionTileState extends State<_RemisionTile> {
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'entregada':
+      case 'recibida':
         return AppTheme.colorExito;
       case 'cancelada':
         return AppTheme.colorError;
@@ -710,10 +732,17 @@ class _ItemRow extends StatelessWidget {
 // ── Dialog: Nueva / Editar remisión ───────────────────────────────────────────
 
 class _RemisionDialog extends StatefulWidget {
+  final List<Project> projects;
+  final List<Supplier> suppliers;
   final Remision? editRemision;
   final VoidCallback onSaved;
 
-  const _RemisionDialog({this.editRemision, required this.onSaved});
+  const _RemisionDialog({
+    required this.projects,
+    required this.suppliers,
+    this.editRemision,
+    required this.onSaved,
+  });
 
   @override
   State<_RemisionDialog> createState() => _RemisionDialogState();
@@ -722,12 +751,12 @@ class _RemisionDialog extends StatefulWidget {
 class _RemisionDialogState extends State<_RemisionDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _folioCtrl;
-  late TextEditingController _projectIdCtrl;
-  late TextEditingController _supplierIdCtrl;
   late TextEditingController _subtotalCtrl;
   late TextEditingController _taxCtrl;
   late TextEditingController _totalCtrl;
   late TextEditingController _notesCtrl;
+  String? _selectedProjectId;
+  String? _selectedSupplierId;
   String _status = 'pendiente';
   DateTime? _date;
   bool _saving = false;
@@ -740,8 +769,6 @@ class _RemisionDialogState extends State<_RemisionDialog> {
     super.initState();
     final r = widget.editRemision;
     _folioCtrl = TextEditingController(text: r?.folio ?? '');
-    _projectIdCtrl = TextEditingController(text: r?.projectId ?? '');
-    _supplierIdCtrl = TextEditingController(text: r?.supplierId ?? '');
     _subtotalCtrl = TextEditingController(
         text: r != null ? r.subtotal.toStringAsFixed(2) : '');
     _taxCtrl = TextEditingController(
@@ -749,6 +776,8 @@ class _RemisionDialogState extends State<_RemisionDialog> {
     _totalCtrl = TextEditingController(
         text: r != null ? r.total.toStringAsFixed(2) : '');
     _notesCtrl = TextEditingController(text: r?.notes ?? '');
+    _selectedProjectId = r?.projectId;
+    _selectedSupplierId = r?.supplierId;
     _status = r?.status ?? 'pendiente';
     _date = r?.date != null ? DateTime.tryParse(r!.date!) : null;
   }
@@ -756,8 +785,6 @@ class _RemisionDialogState extends State<_RemisionDialog> {
   @override
   void dispose() {
     _folioCtrl.dispose();
-    _projectIdCtrl.dispose();
-    _supplierIdCtrl.dispose();
     _subtotalCtrl.dispose();
     _taxCtrl.dispose();
     _totalCtrl.dispose();
@@ -792,8 +819,8 @@ class _RemisionDialogState extends State<_RemisionDialog> {
     });
     final body = <String, dynamic>{
       'folio': _folioCtrl.text.trim(),
-      'projectId': _projectIdCtrl.text.trim(),
-      'supplierId': _supplierIdCtrl.text.trim(),
+      'project': _selectedProjectId ?? '',
+      'supplier': _selectedSupplierId ?? '',
       'date': _date?.toIso8601String().substring(0, 10) ?? '',
       'status': _status,
       'subtotal': double.tryParse(_subtotalCtrl.text) ?? 0.0,
@@ -861,16 +888,34 @@ class _RemisionDialogState extends State<_RemisionDialog> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                TextFormField(
-                  controller: _projectIdCtrl,
+                DropdownButtonFormField<String?>(
+                  value: _selectedProjectId,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('Sin proyecto')),
+                    ...widget.projects.map((p) => DropdownMenuItem<String?>(
+                          value: p.id,
+                          child: Text(p.name),
+                        )),
+                  ],
+                  onChanged: (v) => setState(() => _selectedProjectId = v),
                   decoration:
-                      const InputDecoration(labelText: 'ID Proyecto (opcional)'),
+                      const InputDecoration(labelText: 'Proyecto (opcional)'),
                 ),
                 const SizedBox(height: 10),
-                TextFormField(
-                  controller: _supplierIdCtrl,
+                DropdownButtonFormField<String?>(
+                  value: _selectedSupplierId,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('Sin proveedor')),
+                    ...widget.suppliers.map((s) => DropdownMenuItem<String?>(
+                          value: s.id,
+                          child: Text(s.name),
+                        )),
+                  ],
+                  onChanged: (v) => setState(() => _selectedSupplierId = v),
                   decoration:
-                      const InputDecoration(labelText: 'ID Proveedor (opcional)'),
+                      const InputDecoration(labelText: 'Proveedor (opcional)'),
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -925,7 +970,7 @@ class _RemisionDialogState extends State<_RemisionDialog> {
                     DropdownMenuItem(
                         value: 'pendiente', child: Text('Pendiente')),
                     DropdownMenuItem(
-                        value: 'entregada', child: Text('Entregada')),
+                        value: 'recibida', child: Text('Recibida')),
                     DropdownMenuItem(
                         value: 'cancelada', child: Text('Cancelada')),
                   ],
