@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
 import '../../services/project_service.dart';
 import '../../models/project_model.dart';
-import '../../database/local_repository.dart';
 import '../../services/transaction_service.dart';
 import '../../models/transaction_model.dart';
 import '../../models/chart_data.dart';
@@ -55,63 +51,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
 
     try {
-      final api = context.read<ApiService>();
-
       final results = await Future.wait([
         TransactionService().getAll(),
         ProjectService().getAll(),
-        api.get('/api/graficas/ingreso-egreso'),
       ]);
 
+      if (!mounted) return;
+      final txnList = results[0] as List<Transaction>;
+      final allProjects = results[1] as List<Project>;
+
+      setState(() {
+        _transactions = txnList;
+        _activeProjects = allProjects.where((p) => p.status == 'activo').length;
+        _chartData = _buildChartData(txnList);
+        _loading = false;
+      });
+    } catch (e) {
       if (mounted) {
-        final txnList = results[0] as List<Transaction>;
-        final allProjects = results[1] as List<Project>;
-
-        // Guardar gráfica en cache local (fire-and-forget)
-        final repo = context.read<LocalRepository>();
-        repo.setCacheEntry('graficas/ingreso-egreso', jsonEncode(results[2]));
-
         setState(() {
-          _transactions = txnList;
-          _activeProjects =
-              allProjects.where((p) => p.status == 'activo').length;
-          _chartData = MonthlyChartData.fromApiResponse(results[2]);
+          _error = 'No se pudieron cargar los datos.';
           _loading = false;
         });
       }
-    } on ApiOfflineException {
-      await _loadFromLocal();
-    } catch (e) {
-      await _loadFromLocal();
     }
   }
 
-  Future<void> _loadFromLocal() async {
-    try {
-      final repo = context.read<LocalRepository>();
-      final cachedChart = await repo.getCacheEntry('graficas/ingreso-egreso');
-      List<MonthlyChartData> chartData = [];
-      if (cachedChart != null) {
-        try {
-          chartData = MonthlyChartData.fromApiResponse(jsonDecode(cachedChart));
-        } catch (_) {}
-      }
-      if (mounted) {
-        setState(() {
-          _transactions = [];
-          _activeProjects = 0;
-          _chartData = chartData;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _error = 'Sin datos disponibles.';
-          _loading = false;
-        });
+  List<MonthlyChartData> _buildChartData(List<Transaction> txns) {
+    const meses = [
+      'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+      'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic',
+    ];
+    final Map<String, List<double>> totals = {};
+    for (final t in txns) {
+      if (t.date.length < 7) continue;
+      final key = t.date.substring(0, 7); // 'YYYY-MM'
+      totals.putIfAbsent(key, () => [0.0, 0.0]);
+      if (t.isIncome) {
+        totals[key]![0] += t.amount;
+      } else {
+        totals[key]![1] += t.amount;
       }
     }
+    final now = DateTime.now();
+    return List.generate(6, (i) {
+      final d = DateTime(now.year, now.month - 5 + i);
+      final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
+      final data = totals[key] ?? [0.0, 0.0];
+      return MonthlyChartData(
+        label: meses[d.month - 1],
+        income: data[0],
+        expense: data[1],
+      );
+    });
   }
 
   void _clearFilter() {

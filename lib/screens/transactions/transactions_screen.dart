@@ -599,9 +599,9 @@ class _TransactionDialogState extends State<_TransactionDialog> {
       'amount': double.tryParse(_amountController.text) ?? 0.0,
       'type': _type,
       'date': _date.toIso8601String().substring(0, 10),
-      'projectId': _selectedProjectId ?? '',
-      'categoryId': _selectedCategoryId ?? '',
-      'accountId': _selectedAccountId ?? '',
+      'project': _selectedProjectId?.isNotEmpty == true ? _selectedProjectId : null,
+      'category': _selectedCategoryId?.isNotEmpty == true ? _selectedCategoryId : null,
+      'account': _selectedAccountId?.isNotEmpty == true ? _selectedAccountId : null,
       'notes': _notesController.text.trim(),
     };
     try {
