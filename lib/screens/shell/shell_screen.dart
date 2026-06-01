@@ -14,6 +14,8 @@ import '../suppliers/suppliers_screen.dart';
 import '../inventory/inventory_screen.dart';
 import '../accounts/accounts_screen.dart';
 import '../budgets/budgets_screen.dart';
+import '../remisiones/remisiones_screen.dart';
+import '../facturas/facturas_screen.dart';
 import '../placeholder/placeholder_screen.dart';
 import 'sidebar_widget.dart';
 import '../../services/update_service.dart';
@@ -109,6 +111,10 @@ class _ShellScreenState extends State<ShellScreen> {
         return const AccountsScreen();
       case 9:
         return const BudgetsScreen();
+      case 10:
+        return const RemisionesScreen();
+      case 11:
+        return const FacturasScreen();
       default:
         return const DashboardScreen();
     }

@@ -48,6 +48,8 @@ const List<SidebarSection> _sections = [
       SidebarItem(icon: Icons.inventory_outlined, label: 'Inventario', index: 7),
       SidebarItem(icon: Icons.account_balance_outlined, label: 'Cuentas', index: 8),
       SidebarItem(icon: Icons.savings_outlined, label: 'Presupuestos', index: 9),
+      SidebarItem(icon: Icons.receipt_long_outlined, label: 'Remisiones', index: 10),
+      SidebarItem(icon: Icons.receipt_outlined, label: 'Facturas', index: 11),
     ],
   ),
 ];
