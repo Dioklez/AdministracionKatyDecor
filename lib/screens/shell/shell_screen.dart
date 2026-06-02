@@ -17,6 +17,7 @@ import '../accounts/accounts_screen.dart';
 import '../budgets/budgets_screen.dart';
 import '../remisiones/remisiones_screen.dart';
 import '../facturas/facturas_screen.dart';
+import '../categories/categories_screen.dart';
 import '../placeholder/placeholder_screen.dart';
 import 'sidebar_widget.dart';
 import '../../services/update_service.dart';
@@ -120,6 +121,8 @@ class _ShellScreenState extends State<ShellScreen> {
         return const RemisionesScreen();
       case 11:
         return const FacturasScreen();
+      case 12:
+        return const CategoriesScreen();
       default:
         return const DashboardScreen();
     }

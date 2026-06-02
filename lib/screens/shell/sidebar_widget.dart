@@ -32,6 +32,7 @@ const List<SidebarSection> _sections = [
       SidebarItem(icon: Icons.swap_vert, label: 'Transacciones', index: 1),
       SidebarItem(icon: Icons.folder_outlined, label: 'Proyectos', index: 2),
       SidebarItem(icon: Icons.assignment_outlined, label: 'Bitácora', index: 3),
+      SidebarItem(icon: Icons.label_outlined, label: 'Categorías', index: 12),
     ],
   ),
   SidebarSection(
