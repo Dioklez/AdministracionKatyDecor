@@ -1,5 +1,5 @@
 #define MyAppName "KatyDecor Admin"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.1.0"
 #define MyAppPublisher "Katy Decor Comercial"
 #define MyAppExeName "katydecor_desktop.exe"
 #define MyAppDir "D:\aaron\Documents\Trabajo\KatyDecor\Administracion\KatyDecorDesktop\build\windows\x64\runner\Release"
