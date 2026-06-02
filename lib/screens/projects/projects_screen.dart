@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/project_service.dart';
 import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
@@ -15,7 +17,7 @@ class ProjectsScreen extends StatefulWidget {
 }
 
 class _ProjectsScreenState extends State<ProjectsScreen> {
-  final _service = ProjectService();
+  late ProjectService _service;
   List<Project> _projects = [];
   bool _loading = true;
   String? _error;
@@ -24,6 +26,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   @override
   void initState() {
     super.initState();
+    _service = ProjectService(repo: context.read<LocalRepository>());
     _loadData();
   }
 

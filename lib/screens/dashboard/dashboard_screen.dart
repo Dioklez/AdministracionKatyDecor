@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/project_service.dart';
 import '../../models/project_model.dart';
 import '../../services/transaction_service.dart';
@@ -51,9 +53,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
 
     try {
+      final repo = context.read<LocalRepository>();
       final results = await Future.wait([
-        TransactionService().getAll(),
-        ProjectService().getAll(),
+        TransactionService(repo: repo).getAll(),
+        ProjectService(repo: repo).getAll(),
       ]);
 
       if (!mounted) return;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/auth_service.dart';
+import '../../services/connectivity_service.dart';
 import '../../theme/app_theme.dart';
 import '../login/login_screen.dart';
 
@@ -56,19 +57,18 @@ const List<SidebarSection> _sections = [
 
 class SidebarWidget extends StatelessWidget {
   final int selectedIndex;
-  final bool isOnline;
   final ValueChanged<int> onSelectIndex;
 
   const SidebarWidget({
     super.key,
     required this.selectedIndex,
-    required this.isOnline,
     required this.onSelectIndex,
   });
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
+    final isOnline = context.watch<ConnectivityService>().isOnline;
 
     return Container(
       width: 220,

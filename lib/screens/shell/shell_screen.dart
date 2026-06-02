@@ -1,9 +1,7 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/connectivity_service.dart';
 import '../../services/sync_service.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../login/login_screen.dart';
@@ -31,26 +29,20 @@ class ShellScreen extends StatefulWidget {
 
 class _ShellScreenState extends State<ShellScreen> {
   int _selectedIndex = 0;
-  bool _isOnline = true;
-  Timer? _connectivityTimer;
 
   // Referencias guardadas en initState — no usar context.read() en dispose()
   AuthService? _authService;
-  ApiService? _apiService;
   SyncService? _syncService;
+  ConnectivityService? _connectivityService;
 
   @override
   void initState() {
     super.initState();
     _authService = context.read<AuthService>();
-    _apiService = context.read<ApiService>();
     _syncService = context.read<SyncService>();
+    _connectivityService = context.read<ConnectivityService>();
     _authService!.addListener(_onAuthChanged);
-    _checkConnectivity();
-    _connectivityTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _checkConnectivity(),
-    );
+    _connectivityService!.addListener(_onConnectivityChanged);
 
     // Verificar actualizaciones sin interferir con la carga inicial
     Future.delayed(const Duration(seconds: 3), () {
@@ -61,7 +53,7 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   void dispose() {
     _authService?.removeListener(_onAuthChanged);
-    _connectivityTimer?.cancel();
+    _connectivityService?.removeListener(_onConnectivityChanged);
     super.dispose();
   }
 
@@ -75,22 +67,9 @@ class _ShellScreenState extends State<ShellScreen> {
     }
   }
 
-  Future<void> _checkConnectivity() async {
-    if (!mounted) return;
-    try {
-      final response = await http
-          .head(Uri.parse('https://katydecorpocketbase.fly.dev/api/health'))
-          .timeout(const Duration(seconds: 5));
-      if (!mounted) return;
-      final online = response.statusCode < 500;
-      if (online && !_isOnline) {
-        setState(() => _isOnline = true);
-        _syncService?.fullSync().then((_) {}, onError: (_) {});
-      } else if (!online && _isOnline) {
-        setState(() => _isOnline = false);
-      }
-    } catch (_) {
-      if (mounted && _isOnline) setState(() => _isOnline = false);
+  void _onConnectivityChanged() {
+    if (_connectivityService?.isOnline == true) {
+      _syncService?.fullSync().then((_) {}, onError: (_) {});
     }
   }
 
@@ -135,7 +114,6 @@ class _ShellScreenState extends State<ShellScreen> {
         children: [
           SidebarWidget(
             selectedIndex: _selectedIndex,
-            isOnline: _isOnline,
             onSelectIndex: (i) => setState(() => _selectedIndex = i),
           ),
           Expanded(child: _buildCurrentScreen()),

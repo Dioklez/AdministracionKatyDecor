@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/task_service.dart';
 import '../../services/project_service.dart';
 import '../../models/task_model.dart';
@@ -17,7 +19,7 @@ class TasksScreen extends StatefulWidget {
 }
 
 class _TasksScreenState extends State<TasksScreen> {
-  final _taskService = TaskService();
+  late TaskService _taskService;
   List<Task> _allTasks = [];
   List<Project> _projects = [];
   bool _loading = true;
@@ -29,6 +31,8 @@ class _TasksScreenState extends State<TasksScreen> {
   @override
   void initState() {
     super.initState();
+    final repo = context.read<LocalRepository>();
+    _taskService = TaskService(repo: repo);
     _loadData();
   }
 
@@ -38,9 +42,10 @@ class _TasksScreenState extends State<TasksScreen> {
       _error = null;
     });
     try {
+      final repo = context.read<LocalRepository>();
       final futures = <Future>[
         _taskService.getAll(),
-        if (_projects.isEmpty) ProjectService().getAll(),
+        if (_projects.isEmpty) ProjectService(repo: repo).getAll(),
       ];
       final results = await Future.wait(futures);
       if (!mounted) return;

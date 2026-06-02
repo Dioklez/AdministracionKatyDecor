@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/transaction_service.dart';
 import '../../services/category_service.dart';
 import '../../services/account_service.dart';
@@ -44,11 +46,12 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       _error = null;
     });
     try {
+      final repo = context.read<LocalRepository>();
       final futures = <Future>[
-        TransactionService().getAll(),
-        if (_projects.isEmpty) ProjectService().getAll(),
-        if (_categories.isEmpty) CategoryService().getAll(),
-        if (_accounts.isEmpty) AccountService().getAll(),
+        TransactionService(repo: repo).getAll(),
+        if (_projects.isEmpty) ProjectService(repo: repo).getAll(),
+        if (_categories.isEmpty) CategoryService(repo: repo).getAll(),
+        if (_accounts.isEmpty) AccountService(repo: repo).getAll(),
       ];
       final results = await Future.wait(futures);
       if (!mounted) return;
