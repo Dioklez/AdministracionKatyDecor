@@ -32,7 +32,7 @@ class UpdateService {
       final latestVersion =
           (data['tag_name'] as String).replaceAll('v', '');
 
-      print('[UPDATE] Versión actual: ${AppConfig.version}');
+      print('[UPDATE] Versión actual (AppConfig): ${AppConfig.version}');
       print('[UPDATE] Versión GitHub: $latestVersion');
       print('[UPDATE] ¿Hay update?: ${_isNewerVersion(latestVersion, AppConfig.version)}');
 
