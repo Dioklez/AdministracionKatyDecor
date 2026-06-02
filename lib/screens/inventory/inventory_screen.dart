@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../../database/local_repository.dart';
 import '../../services/inventory_item_service.dart';
 import '../../services/inventory_movement_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 import '../../models/inventory_item_model.dart';
 import '../../models/inventory_movement_model.dart';
 import '../../theme/app_theme.dart';
@@ -517,7 +519,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await InventoryItemService().delete(item.id);
+        final connectivity = context.read<ConnectivityService>();
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        Future<void> deleteOffline() async {
+          await repo.deleteInventoryItem(item.id);
+          await queue.enqueue(entityType: 'inventory_items', operation: 'delete',
+              endpoint: 'inventory_items', entityId: item.id, payload: {});
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await InventoryItemService(repo: repo).delete(item.id); }
+          catch (_) { await deleteOffline(); }
+        } else { await deleteOffline(); }
         if (mounted) {
           setState(() {
             if (_selectedId == item.id) {
@@ -846,10 +861,98 @@ class _ItemDialogState extends State<_ItemDialog> {
       'notes': _notesController.text.trim(),
     };
     try {
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
       if (_isEditing) {
-        await InventoryItemService().update(widget.editItem!.id, data);
-      } else {
-        await InventoryItemService().create(data);
+        final id = widget.editItem!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertInventoryItem(InventoryItem(
+            id: id,
+            name: data['name'] as String,
+            description: (data['description'] as String).isNotEmpty
+                ? data['description'] as String : null,
+            unit: (data['unit'] as String).isNotEmpty
+                ? data['unit'] as String : null,
+            currentStock: widget.editItem!.currentStock,
+            minStock: (data['min_stock'] as num?) != 0
+                ? (data['min_stock'] as num?)?.toDouble() : null,
+            supplierProductId: widget.editItem!.supplierProductId,
+            location: (data['location'] as String).isNotEmpty
+                ? data['location'] as String : null,
+            notes: (data['notes'] as String).isNotEmpty
+                ? data['notes'] as String : null,
+            created: widget.editItem!.created,
+            updated: DateTime.now(),
+          ));
+          await queue.enqueue(entityType: 'inventory_items', operation: 'update',
+              endpoint: 'inventory_items', entityId: id, payload: data);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await InventoryItemService(repo: repo).update(id, data); }
+          catch (_) { await upsertOffline(); }
+        } else { await upsertOffline(); }
+        if (mounted) widget.onSaved();
+        return;
+      }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertInventoryItem(InventoryItem(
+          id: tempId,
+          name: data['name'] as String,
+          description: (data['description'] as String).isNotEmpty
+              ? data['description'] as String : null,
+          unit: (data['unit'] as String).isNotEmpty
+              ? data['unit'] as String : null,
+          currentStock: 0,
+          minStock: (data['min_stock'] as num?) != 0
+              ? (data['min_stock'] as num?)?.toDouble() : null,
+          supplierProductId: null,
+          location: (data['location'] as String).isNotEmpty
+              ? data['location'] as String : null,
+          notes: (data['notes'] as String).isNotEmpty
+              ? data['notes'] as String : null,
+          created: DateTime.now(),
+          updated: DateTime.now(),
+        ));
+        await queue.enqueue(entityType: 'inventory_items', operation: 'create',
+            endpoint: 'inventory_items', payload: {...data, '_tempId': tempId});
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+          widget.onSaved();
+        }
+        return;
+      }
+      try {
+        await InventoryItemService(repo: repo).create(data);
+      } catch (_) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertInventoryItem(InventoryItem(
+          id: tempId, name: data['name'] as String,
+          description: (data['description'] as String).isNotEmpty
+              ? data['description'] as String : null,
+          unit: (data['unit'] as String).isNotEmpty
+              ? data['unit'] as String : null,
+          currentStock: 0,
+          minStock: (data['min_stock'] as num?) != 0
+              ? (data['min_stock'] as num?)?.toDouble() : null,
+          supplierProductId: null,
+          location: (data['location'] as String).isNotEmpty
+              ? data['location'] as String : null,
+          notes: (data['notes'] as String).isNotEmpty
+              ? data['notes'] as String : null,
+          created: DateTime.now(), updated: DateTime.now(),
+        ));
+        await queue.enqueue(entityType: 'inventory_items', operation: 'create',
+            endpoint: 'inventory_items', payload: {...data, '_tempId': tempId});
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
       }
       if (mounted) widget.onSaved();
     } catch (e) {
@@ -1037,30 +1140,86 @@ class _MovementDialogState extends State<_MovementDialog> {
     }
     try {
       final itemId = widget.item.id;
-
-      // 1. Registrar movimiento
-      await InventoryMovementService().create({
+      final dateStr = _date.toIso8601String().substring(0, 10);
+      final movBody = {
         'inventory_item': itemId,
         'type': _type,
         'quantity': quantity,
-        'date': _date.toIso8601String().substring(0, 10),
+        'date': dateStr,
         'notes': _notesController.text.trim(),
-      });
+      };
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
 
-      // 2. Recalcular stock desde todos los movimientos
-      final movements = await InventoryMovementService().getByItem(itemId);
-      double newStock = 0;
-      for (final m in movements) {
-        if (m.type == 'salida') {
-          newStock -= m.quantity;
-        } else {
-          // entrada y ajuste suman (ajuste puede venir negativo)
-          newStock += m.quantity;
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertInventoryMovements([InventoryMovement(
+          id: tempId,
+          inventoryItemId: itemId,
+          type: _type,
+          quantity: quantity,
+          date: dateStr,
+          projectId: null,
+          notes: _notesController.text.trim().isNotEmpty
+              ? _notesController.text.trim() : null,
+          created: DateTime.now(),
+          updated: DateTime.now(),
+        )]);
+        await queue.enqueue(entityType: 'inventory_movements', operation: 'create',
+            endpoint: 'inventory_movements',
+            payload: {...movBody, '_tempId': tempId});
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+          widget.onSaved();
         }
+        return;
       }
 
-      // 3. Actualizar current_stock en PocketBase
-      await InventoryItemService().update(itemId, {'current_stock': newStock});
+      // ONLINE PATH
+      bool savedOffline = false;
+      try {
+        // 1. Registrar movimiento
+        await InventoryMovementService(repo: repo).create(movBody);
+
+        // 2. Recalcular stock desde todos los movimientos
+        final movements = await InventoryMovementService(repo: repo).getByItem(itemId);
+        double newStock = 0;
+        for (final m in movements) {
+          if (m.type == 'salida') {
+            newStock -= m.quantity;
+          } else {
+            newStock += m.quantity;
+          }
+        }
+
+        // 3. Actualizar current_stock en PocketBase
+        await InventoryItemService(repo: repo).update(itemId, {'current_stock': newStock});
+      } catch (_) {
+        savedOffline = true;
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertInventoryMovements([InventoryMovement(
+          id: tempId,
+          inventoryItemId: itemId,
+          type: _type,
+          quantity: quantity,
+          date: dateStr,
+          projectId: null,
+          notes: _notesController.text.trim().isNotEmpty
+              ? _notesController.text.trim() : null,
+          created: DateTime.now(),
+          updated: DateTime.now(),
+        )]);
+        await queue.enqueue(entityType: 'inventory_movements', operation: 'create',
+            endpoint: 'inventory_movements',
+            payload: {...movBody, '_tempId': tempId});
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+      }
+      if (!savedOffline) {
+        // noop — success message not needed
+      }
 
       // 4. Refrescar UI
       if (mounted) widget.onSaved();

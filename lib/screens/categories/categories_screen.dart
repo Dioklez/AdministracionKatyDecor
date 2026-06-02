@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../database/local_repository.dart';
 import '../../services/category_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 import '../../models/category_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
@@ -318,7 +320,20 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await CategoryService().delete(cat.id);
+        final connectivity = context.read<ConnectivityService>();
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        Future<void> deleteOffline() async {
+          await repo.deleteCategory(cat.id);
+          await queue.enqueue(entityType: 'categories', operation: 'delete',
+              endpoint: 'categories', entityId: cat.id, payload: {});
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await CategoryService(repo: repo).delete(cat.id); }
+          catch (_) { await deleteOffline(); }
+        } else { await deleteOffline(); }
         if (mounted) {
           setState(() { if (_selectedId == cat.id) _selectedId = null; });
           _loadCategories();
@@ -518,20 +533,62 @@ class _CategoryDialogState extends State<_CategoryDialog> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() { _saving = true; _error = null; });
+    final name = _nameController.text.trim();
+    final color = _colorController.text.trim();
+    final body = <String, dynamic>{'name': name, 'type': _type, 'color': color};
     try {
-      final svc = CategoryService();
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
       if (_isEditing) {
-        await svc.update(widget.editCategory!.id, {
-          'name': _nameController.text.trim(),
-          'type': _type,
-          'color': _colorController.text.trim(),
-        });
-      } else {
-        await svc.create(
-          _nameController.text.trim(),
-          _type,
-          _colorController.text.trim(),
-        );
+        final id = widget.editCategory!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertCategories([Category(
+            id: id, name: name, type: _type, color: color,
+            created: widget.editCategory!.created, updated: DateTime.now(),
+          )]);
+          await queue.enqueue(entityType: 'categories', operation: 'update',
+              endpoint: 'categories', entityId: id, payload: body);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await CategoryService(repo: repo).update(id, body); }
+          catch (_) { await upsertOffline(); }
+        } else { await upsertOffline(); }
+        if (mounted) widget.onSaved();
+        return;
+      }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertCategories([Category(
+          id: tempId, name: name, type: _type, color: color,
+          created: DateTime.now(), updated: DateTime.now(),
+        )]);
+        await queue.enqueue(entityType: 'categories', operation: 'create',
+            endpoint: 'categories', payload: {...body, '_tempId': tempId});
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+          widget.onSaved();
+        }
+        return;
+      }
+      try {
+        await CategoryService(repo: repo).create(name, _type, color);
+      } catch (_) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertCategories([Category(
+          id: tempId, name: name, type: _type, color: color,
+          created: DateTime.now(), updated: DateTime.now(),
+        )]);
+        await queue.enqueue(entityType: 'categories', operation: 'create',
+            endpoint: 'categories', payload: {...body, '_tempId': tempId});
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
       }
       if (mounted) widget.onSaved();
     } catch (e) {

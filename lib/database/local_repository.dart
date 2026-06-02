@@ -167,6 +167,10 @@ class LocalRepository {
     });
   }
 
+  Future<void> deleteCategory(String id) async {
+    await (_db.delete(_db.localCategories)..where((t) => t.id.equals(id))).go();
+  }
+
   LocalCategoriesCompanion _categoryCompanion(Category c) =>
       LocalCategoriesCompanion(
         id: Value(c.id),
@@ -237,6 +241,10 @@ class LocalRepository {
     await _db
         .into(_db.localSuppliers)
         .insert(_supplierCompanion(s), mode: InsertMode.insertOrReplace);
+  }
+
+  Future<void> deleteSupplier(String id) async {
+    await (_db.delete(_db.localSuppliers)..where((t) => t.id.equals(id))).go();
   }
 
   LocalSuppliersCompanion _supplierCompanion(Supplier s) =>
@@ -358,6 +366,10 @@ class LocalRepository {
     });
   }
 
+  Future<void> deleteQuote(String id) async {
+    await (_db.delete(_db.localQuotes)..where((t) => t.id.equals(id))).go();
+  }
+
   LocalQuotesCompanion _quoteCompanion(Quote q) => LocalQuotesCompanion(
         id: Value(q.id),
         folio: Value(q.folio),
@@ -390,6 +402,10 @@ class LocalRepository {
         mode: InsertMode.insertOrReplace,
       );
     });
+  }
+
+  Future<void> deleteBudget(String id) async {
+    await (_db.delete(_db.localBudgets)..where((t) => t.id.equals(id))).go();
   }
 
   LocalBudgetsCompanion _budgetCompanion(Budget b) => LocalBudgetsCompanion(
@@ -431,6 +447,10 @@ class LocalRepository {
     });
   }
 
+  Future<void> deleteSupplierProduct(String id) async {
+    await (_db.delete(_db.localSupplierProducts)..where((t) => t.id.equals(id))).go();
+  }
+
   LocalSupplierProductsCompanion _supplierProductCompanion(
           SupplierProduct sp) =>
       LocalSupplierProductsCompanion(
@@ -466,6 +486,10 @@ class LocalRepository {
     await _db
         .into(_db.localInventoryItems)
         .insert(_inventoryItemCompanion(item), mode: InsertMode.insertOrReplace);
+  }
+
+  Future<void> deleteInventoryItem(String id) async {
+    await (_db.delete(_db.localInventoryItems)..where((t) => t.id.equals(id))).go();
   }
 
   LocalInventoryItemsCompanion _inventoryItemCompanion(InventoryItem item) =>
@@ -576,6 +600,10 @@ class LocalRepository {
     });
   }
 
+  Future<void> deleteRemision(String id) async {
+    await (_db.delete(_db.localRemisiones)..where((t) => t.id.equals(id))).go();
+  }
+
   LocalRemisionesCompanion _remisionCompanion(Remision r) =>
       LocalRemisionesCompanion(
         id: Value(r.id),
@@ -658,6 +686,30 @@ class LocalRepository {
           ..where((t) => t.id.like('temp_%')))
         .go();
     await (_db.delete(_db.localAccounts)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localCategories)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localSuppliers)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localSupplierProducts)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localInventoryItems)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localInventoryMovements)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localQuotes)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localBudgets)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localRemisiones)
           ..where((t) => t.id.like('temp_%')))
         .go();
   }

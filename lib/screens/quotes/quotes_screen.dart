@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../../database/local_repository.dart';
 import '../../services/quote_service.dart';
 import '../../services/project_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 import '../../models/quote_model.dart';
 import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
@@ -102,13 +104,25 @@ class _QuotesScreenState extends State<QuotesScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await QuoteService().delete(q.id);
+        final connectivity = context.read<ConnectivityService>();
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        Future<void> deleteOffline() async {
+          await repo.deleteQuote(q.id);
+          await queue.enqueue(entityType: 'quotes', operation: 'delete',
+              endpoint: 'quotes', entityId: q.id, payload: {});
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await QuoteService(repo: repo).delete(q.id); }
+          catch (_) { await deleteOffline(); }
+        } else { await deleteOffline(); }
         await _loadData();
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('No se pudo eliminar la cotización.')),
+            const SnackBar(content: Text('No se pudo eliminar la cotización.')),
           );
         }
       }
@@ -625,11 +639,72 @@ class _QuoteDialogState extends State<_QuoteDialog> {
       'notes': _notesController.text.trim(),
     };
     try {
-      final svc = QuoteService();
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
+      Quote _quoteFromBody(String id, {required DateTime created}) => Quote(
+        id: id,
+        folio: (body['folio'] as String).isNotEmpty ? body['folio'] as String : null,
+        projectId: (body['project'] as String).isNotEmpty
+            ? body['project'] as String : null,
+        clientName: (body['client_name'] as String).isNotEmpty
+            ? body['client_name'] as String : null,
+        clientPhone: (body['client_phone'] as String).isNotEmpty
+            ? body['client_phone'] as String : null,
+        date: (body['date'] as String).isNotEmpty ? body['date'] as String : null,
+        validUntil: (body['valid_until'] as String).isNotEmpty
+            ? body['valid_until'] as String : null,
+        status: body['status'] as String,
+        subtotal: (body['subtotal'] as num).toDouble(),
+        tax: (body['tax'] as num).toDouble(),
+        total: (body['total'] as num).toDouble(),
+        notes: (body['notes'] as String).isNotEmpty ? body['notes'] as String : null,
+        items: _isEditing ? widget.editQuote!.items : [],
+        created: created,
+        updated: DateTime.now(),
+      );
+
       if (_isEditing) {
-        await svc.update(widget.editQuote!.id, body);
-      } else {
-        await svc.create(body);
+        final id = widget.editQuote!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertQuotes([_quoteFromBody(id,
+              created: widget.editQuote!.created)]);
+          await queue.enqueue(entityType: 'quotes', operation: 'update',
+              endpoint: 'quotes', entityId: id, payload: body);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await QuoteService(repo: repo).update(id, body); }
+          catch (_) { await upsertOffline(); }
+        } else { await upsertOffline(); }
+        if (mounted) widget.onSaved();
+        return;
+      }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertQuotes([_quoteFromBody(tempId, created: DateTime.now())]);
+        await queue.enqueue(entityType: 'quotes', operation: 'create',
+            endpoint: 'quotes', payload: {...body, '_tempId': tempId});
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+          widget.onSaved();
+        }
+        return;
+      }
+      try {
+        await QuoteService(repo: repo).create(body);
+      } catch (_) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertQuotes([_quoteFromBody(tempId, created: DateTime.now())]);
+        await queue.enqueue(entityType: 'quotes', operation: 'create',
+            endpoint: 'quotes', payload: {...body, '_tempId': tempId});
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
       }
       if (mounted) widget.onSaved();
     } catch (e) {

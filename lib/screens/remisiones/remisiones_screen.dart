@@ -5,6 +5,8 @@ import '../../database/local_repository.dart';
 import '../../services/remision_service.dart';
 import '../../services/project_service.dart';
 import '../../services/supplier_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 import '../../models/remision_model.dart';
 import '../../models/project_model.dart';
 import '../../models/supplier_model.dart';
@@ -412,7 +414,20 @@ class _RemisionesScreenState extends State<RemisionesScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await RemisionService().delete(r.id);
+        final connectivity = context.read<ConnectivityService>();
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        Future<void> deleteOffline() async {
+          await repo.deleteRemision(r.id);
+          await queue.enqueue(entityType: 'remisiones', operation: 'delete',
+              endpoint: 'remisiones', entityId: r.id, payload: {});
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await RemisionService(repo: repo).delete(r.id); }
+          catch (_) { await deleteOffline(); }
+        } else { await deleteOffline(); }
         if (mounted) {
           setState(() {
             if (_selectedId == r.id) _selectedId = null;
@@ -422,8 +437,7 @@ class _RemisionesScreenState extends State<RemisionesScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('No se pudo eliminar la remisión.')),
+            const SnackBar(content: Text('No se pudo eliminar la remisión.')),
           );
         }
       }
@@ -832,11 +846,68 @@ class _RemisionDialogState extends State<_RemisionDialog> {
       'notes': _notesCtrl.text.trim(),
     };
     try {
-      final svc = RemisionService();
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
+      Remision _remisionFromBody(String id, {required DateTime created}) => Remision(
+        id: id,
+        folio: (body['folio'] as String).isNotEmpty ? body['folio'] as String : null,
+        projectId: (body['project'] as String).isNotEmpty
+            ? body['project'] as String : null,
+        supplierId: (body['supplier'] as String).isNotEmpty
+            ? body['supplier'] as String : null,
+        date: (body['date'] as String).isNotEmpty ? body['date'] as String : null,
+        status: body['status'] as String,
+        subtotal: (body['subtotal'] as num).toDouble(),
+        tax: (body['tax'] as num).toDouble(),
+        total: (body['total'] as num).toDouble(),
+        notes: (body['notes'] as String).isNotEmpty ? body['notes'] as String : null,
+        items: _isEditing ? widget.editRemision!.items : [],
+        created: created,
+        updated: DateTime.now(),
+      );
+
       if (_isEditing) {
-        await svc.update(widget.editRemision!.id, body);
-      } else {
-        await svc.create(body);
+        final id = widget.editRemision!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertRemisiones([_remisionFromBody(id,
+              created: widget.editRemision!.created)]);
+          await queue.enqueue(entityType: 'remisiones', operation: 'update',
+              endpoint: 'remisiones', entityId: id, payload: body);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await RemisionService(repo: repo).update(id, body); }
+          catch (_) { await upsertOffline(); }
+        } else { await upsertOffline(); }
+        if (mounted) widget.onSaved();
+        return;
+      }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertRemisiones([_remisionFromBody(tempId, created: DateTime.now())]);
+        await queue.enqueue(entityType: 'remisiones', operation: 'create',
+            endpoint: 'remisiones', payload: {...body, '_tempId': tempId});
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+          widget.onSaved();
+        }
+        return;
+      }
+      try {
+        await RemisionService(repo: repo).create(body);
+      } catch (_) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertRemisiones([_remisionFromBody(tempId, created: DateTime.now())]);
+        await queue.enqueue(entityType: 'remisiones', operation: 'create',
+            endpoint: 'remisiones', payload: {...body, '_tempId': tempId});
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
       }
       if (mounted) widget.onSaved();
     } catch (e) {

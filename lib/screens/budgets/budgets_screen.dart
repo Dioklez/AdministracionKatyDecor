@@ -5,6 +5,8 @@ import '../../database/local_repository.dart';
 import '../../services/budget_service.dart';
 import '../../services/category_service.dart';
 import '../../services/project_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 import '../../models/budget_model.dart';
 import '../../models/category_model.dart';
 import '../../models/project_model.dart';
@@ -305,13 +307,25 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await BudgetService().delete(b.id);
+        final connectivity = context.read<ConnectivityService>();
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        Future<void> deleteOffline() async {
+          await repo.deleteBudget(b.id);
+          await queue.enqueue(entityType: 'budgets', operation: 'delete',
+              endpoint: 'budgets', entityId: b.id, payload: {});
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await BudgetService(repo: repo).delete(b.id); }
+          catch (_) { await deleteOffline(); }
+        } else { await deleteOffline(); }
         await _loadData();
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('No se pudo eliminar el presupuesto.')),
+            const SnackBar(content: Text('No se pudo eliminar el presupuesto.')),
           );
         }
       }
@@ -633,11 +647,71 @@ class _BudgetDialogState extends State<_BudgetDialog> {
       'notes': _notesController.text.trim(),
     };
     try {
-      final svc = BudgetService();
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
+      Budget _budgetFromBody(String id, {required DateTime created}) => Budget(
+        id: id,
+        name: body['name'] as String,
+        projectId: (body['project'] as String).isNotEmpty
+            ? body['project'] as String : null,
+        period: (body['period'] as String).isNotEmpty
+            ? body['period'] as String : null,
+        startDate: (body['start_date'] as String).isNotEmpty
+            ? body['start_date'] as String : null,
+        endDate: (body['end_date'] as String).isNotEmpty
+            ? body['end_date'] as String : null,
+        plannedAmount: (body['planned_amount'] as num).toDouble(),
+        actualAmount: (body['actual_amount'] as num).toDouble(),
+        categoryId: (body['category'] as String).isNotEmpty
+            ? body['category'] as String : null,
+        notes: (body['notes'] as String).isNotEmpty
+            ? body['notes'] as String : null,
+        created: created,
+        updated: DateTime.now(),
+      );
+
       if (_isEditing) {
-        await svc.update(widget.editBudget!.id, body);
-      } else {
-        await svc.create(body);
+        final id = widget.editBudget!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertBudgets([_budgetFromBody(id,
+              created: widget.editBudget!.created)]);
+          await queue.enqueue(entityType: 'budgets', operation: 'update',
+              endpoint: 'budgets', entityId: id, payload: body);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await BudgetService(repo: repo).update(id, body); }
+          catch (_) { await upsertOffline(); }
+        } else { await upsertOffline(); }
+        if (mounted) widget.onSaved();
+        return;
+      }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertBudgets([_budgetFromBody(tempId, created: DateTime.now())]);
+        await queue.enqueue(entityType: 'budgets', operation: 'create',
+            endpoint: 'budgets', payload: {...body, '_tempId': tempId});
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+          widget.onSaved();
+        }
+        return;
+      }
+      try {
+        await BudgetService(repo: repo).create(body);
+      } catch (_) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertBudgets([_budgetFromBody(tempId, created: DateTime.now())]);
+        await queue.enqueue(entityType: 'budgets', operation: 'create',
+            endpoint: 'budgets', payload: {...body, '_tempId': tempId});
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
       }
       if (mounted) widget.onSaved();
     } catch (e) {

@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../../database/local_repository.dart';
 import '../../services/supplier_service.dart';
 import '../../services/supplier_product_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 import '../../models/supplier_model.dart';
 import '../../models/supplier_product_model.dart';
 import '../../theme/app_theme.dart';
@@ -475,7 +477,20 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await SupplierProductService().delete(p.id);
+        final connectivity = context.read<ConnectivityService>();
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        Future<void> deleteOffline() async {
+          await repo.deleteSupplierProduct(p.id);
+          await queue.enqueue(entityType: 'supplier_products', operation: 'delete',
+              endpoint: 'supplier_products', entityId: p.id, payload: {});
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await SupplierProductService(repo: repo).delete(p.id); }
+          catch (_) { await deleteOffline(); }
+        } else { await deleteOffline(); }
         if (mounted) _loadProducts(p.supplierId);
       } catch (_) {
         if (mounted) {
@@ -526,7 +541,20 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await SupplierService().delete(s.id);
+        final connectivity = context.read<ConnectivityService>();
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        Future<void> deleteOffline() async {
+          await repo.deleteSupplier(s.id);
+          await queue.enqueue(entityType: 'suppliers', operation: 'delete',
+              endpoint: 'suppliers', entityId: s.id, payload: {});
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await SupplierService(repo: repo).delete(s.id); }
+          catch (_) { await deleteOffline(); }
+        } else { await deleteOffline(); }
         if (mounted) {
           setState(() {
             if (_selectedId == s.id) _selectedId = null;
@@ -536,8 +564,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('No se pudo eliminar el proveedor.')),
+            const SnackBar(content: Text('No se pudo eliminar el proveedor.')),
           );
         }
       }
@@ -765,10 +792,83 @@ class _SupplierProductDialogState extends State<_SupplierProductDialog> {
       'is_active': _isActive,
     };
     try {
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
       if (_isEditing) {
-        await SupplierProductService().update(widget.editProduct!.id, data);
-      } else {
-        await SupplierProductService().create(data);
+        final id = widget.editProduct!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertSupplierProducts([SupplierProduct(
+            id: id,
+            supplierId: widget.supplierId,
+            name: data['name'] as String,
+            description: (data['description'] as String).isNotEmpty
+                ? data['description'] as String : null,
+            sku: (data['sku'] as String).isNotEmpty ? data['sku'] as String : null,
+            unit: (data['unit'] as String).isNotEmpty ? data['unit'] as String : null,
+            price: (data['price'] as num).toDouble(),
+            isActive: data['is_active'] as bool,
+            created: widget.editProduct!.created,
+            updated: DateTime.now(),
+          )]);
+          await queue.enqueue(entityType: 'supplier_products', operation: 'update',
+              endpoint: 'supplier_products', entityId: id, payload: data);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await SupplierProductService(repo: repo).update(id, data); }
+          catch (_) { await upsertOffline(); }
+        } else { await upsertOffline(); }
+        if (mounted) widget.onSaved();
+        return;
+      }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertSupplierProducts([SupplierProduct(
+          id: tempId,
+          supplierId: widget.supplierId,
+          name: data['name'] as String,
+          description: (data['description'] as String).isNotEmpty
+              ? data['description'] as String : null,
+          sku: (data['sku'] as String).isNotEmpty ? data['sku'] as String : null,
+          unit: (data['unit'] as String).isNotEmpty ? data['unit'] as String : null,
+          price: (data['price'] as num).toDouble(),
+          isActive: data['is_active'] as bool,
+          created: DateTime.now(),
+          updated: DateTime.now(),
+        )]);
+        await queue.enqueue(entityType: 'supplier_products', operation: 'create',
+            endpoint: 'supplier_products', payload: {...data, '_tempId': tempId});
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+          widget.onSaved();
+        }
+        return;
+      }
+      try {
+        await SupplierProductService(repo: repo).create(data);
+      } catch (_) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertSupplierProducts([SupplierProduct(
+          id: tempId, supplierId: widget.supplierId,
+          name: data['name'] as String,
+          description: (data['description'] as String).isNotEmpty
+              ? data['description'] as String : null,
+          sku: (data['sku'] as String).isNotEmpty ? data['sku'] as String : null,
+          unit: (data['unit'] as String).isNotEmpty ? data['unit'] as String : null,
+          price: (data['price'] as num).toDouble(),
+          isActive: data['is_active'] as bool,
+          created: DateTime.now(), updated: DateTime.now(),
+        )]);
+        await queue.enqueue(entityType: 'supplier_products', operation: 'create',
+            endpoint: 'supplier_products', payload: {...data, '_tempId': tempId});
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
       }
       if (mounted) widget.onSaved();
     } catch (e) {
@@ -951,10 +1051,66 @@ class _SupplierDialogState extends State<_SupplierDialog> {
       'isActive': _isActive,
     };
     try {
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
+      Supplier _supplierFromData(String id, {required DateTime created}) => Supplier(
+        id: id,
+        name: data['name'] as String,
+        contactName: (data['contactName'] as String).isNotEmpty
+            ? data['contactName'] as String : null,
+        phone: (data['phone'] as String).isNotEmpty ? data['phone'] as String : null,
+        email: (data['email'] as String).isNotEmpty ? data['email'] as String : null,
+        address: (data['address'] as String).isNotEmpty
+            ? data['address'] as String : null,
+        notes: (data['notes'] as String).isNotEmpty ? data['notes'] as String : null,
+        isActive: data['isActive'] as bool,
+        created: created,
+        updated: DateTime.now(),
+      );
+
       if (_isEditing) {
-        await SupplierService().update(widget.editSupplier!.id, data);
-      } else {
-        await SupplierService().create(data);
+        final id = widget.editSupplier!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertSupplier(_supplierFromData(id,
+              created: widget.editSupplier!.created));
+          await queue.enqueue(entityType: 'suppliers', operation: 'update',
+              endpoint: 'suppliers', entityId: id, payload: data);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await SupplierService(repo: repo).update(id, data); }
+          catch (_) { await upsertOffline(); }
+        } else { await upsertOffline(); }
+        if (mounted) widget.onSaved();
+        return;
+      }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertSupplier(_supplierFromData(tempId,
+            created: DateTime.now()));
+        await queue.enqueue(entityType: 'suppliers', operation: 'create',
+            endpoint: 'suppliers', payload: {...data, '_tempId': tempId});
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+          widget.onSaved();
+        }
+        return;
+      }
+      try {
+        await SupplierService(repo: repo).create(data);
+      } catch (_) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertSupplier(_supplierFromData(tempId, created: DateTime.now()));
+        await queue.enqueue(entityType: 'suppliers', operation: 'create',
+            endpoint: 'suppliers', payload: {...data, '_tempId': tempId});
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
       }
       if (mounted) widget.onSaved();
     } catch (e) {

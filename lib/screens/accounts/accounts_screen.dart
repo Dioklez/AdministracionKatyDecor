@@ -474,7 +474,20 @@ class _AccountsScreenState extends State<AccountsScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await AccountService().delete(a.id);
+        final connectivity = context.read<ConnectivityService>();
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        Future<void> deleteOffline() async {
+          await repo.deleteAccount(a.id);
+          await queue.enqueue(entityType: 'accounts', operation: 'delete',
+              endpoint: 'accounts', entityId: a.id, payload: {});
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await AccountService(repo: repo).delete(a.id); }
+          catch (_) { await deleteOffline(); }
+        } else { await deleteOffline(); }
         if (mounted) {
           setState(() {
             if (_selectedId == a.id) {
@@ -834,9 +847,41 @@ class _AccountDialogState extends State<_AccountDialog> {
     };
     try {
       final connectivity = context.read<ConnectivityService>();
-      if (!_isEditing && !connectivity.isOnline) {
-        final repo = context.read<LocalRepository>();
-        final queue = context.read<OfflineQueueService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
+      if (_isEditing) {
+        final id = widget.editAccount!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertAccount(Account(
+            id: id,
+            name: data['name'] as String,
+            type: data['type'] as String,
+            balance: (data['balance'] as num).toDouble(),
+            initialBalance: widget.editAccount!.initialBalance,
+            bankName: (data['bank_name'] as String).isNotEmpty
+                ? data['bank_name'] as String : null,
+            accountNumber: (data['account_number'] as String).isNotEmpty
+                ? data['account_number'] as String : null,
+            isActive: data['is_active'] as bool,
+            created: widget.editAccount!.created,
+            updated: DateTime.now(),
+          ));
+          await queue.enqueue(entityType: 'accounts', operation: 'update',
+              endpoint: 'accounts', entityId: id, payload: data);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+        if (connectivity.isOnline) {
+          try { await AccountService(repo: repo).update(id, data); }
+          catch (_) { await upsertOffline(); }
+        } else { await upsertOffline(); }
+        if (mounted) widget.onSaved();
+        return;
+      }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
         final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
         await repo.upsertAccount(Account(
           id: tempId,
@@ -845,35 +890,23 @@ class _AccountDialogState extends State<_AccountDialog> {
           balance: (data['balance'] as num).toDouble(),
           initialBalance: (data['initial_balance'] as num).toDouble(),
           bankName: (data['bank_name'] as String).isNotEmpty
-              ? data['bank_name'] as String
-              : null,
+              ? data['bank_name'] as String : null,
           accountNumber: (data['account_number'] as String).isNotEmpty
-              ? data['account_number'] as String
-              : null,
+              ? data['account_number'] as String : null,
           isActive: data['is_active'] as bool,
           created: DateTime.now(),
           updated: DateTime.now(),
         ));
-        await queue.enqueue(
-          entityType: 'accounts',
-          operation: 'create',
-          endpoint: 'accounts',
-          payload: {...data, '_tempId': tempId},
-        );
+        await queue.enqueue(entityType: 'accounts', operation: 'create',
+            endpoint: 'accounts', payload: {...data, '_tempId': tempId});
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Guardado localmente. Se sincronizará al reconectar.')),
-          );
+            const SnackBar(content: Text('Guardado localmente. Se sincronizará al reconectar.')));
           widget.onSaved();
         }
         return;
       }
-      if (_isEditing) {
-        await AccountService().update(widget.editAccount!.id, data);
-      } else {
-        await AccountService().create(data);
-      }
+      await AccountService(repo: repo).create(data);
       if (mounted) widget.onSaved();
     } catch (e) {
       if (mounted) {
