@@ -11,6 +11,11 @@ class AccountService {
     return records.map(Account.fromRecord).toList();
   }
 
+  Future<Account> getById(String id) async {
+    final record = await _pb.collection('accounts').getOne(id);
+    return Account.fromRecord(record);
+  }
+
   Future<Account> create(Map<String, dynamic> data) async {
     try {
       final record = await _pb.collection('accounts').create(body: data);

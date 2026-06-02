@@ -4,6 +4,7 @@ import '../../services/transaction_service.dart';
 import '../../services/category_service.dart';
 import '../../services/account_service.dart';
 import '../../services/project_service.dart';
+import '../../services/recalculate_service.dart';
 import '../../models/transaction_model.dart';
 import '../../models/category_model.dart';
 import '../../models/account_model.dart';
@@ -274,7 +275,13 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     );
     if (confirmed != true || !mounted) return;
     try {
+      final projectId = t.projectId;
+      final accountId = t.accountId;
       await TransactionService().delete(t.id);
+      if (projectId != null && projectId.isNotEmpty)
+        RecalculateService().recalculateProject(projectId).ignore();
+      if (accountId != null && accountId.isNotEmpty)
+        RecalculateService().recalculateAccount(accountId).ignore();
       await _loadData();
     } catch (e) {
       if (mounted) {
@@ -611,6 +618,12 @@ class _TransactionDialogState extends State<_TransactionDialog> {
       } else {
         await svc.update(widget.transaction!.id, body);
       }
+      final projectId = _selectedProjectId;
+      final accountId = _selectedAccountId;
+      if (projectId != null && projectId.isNotEmpty)
+        RecalculateService().recalculateProject(projectId).ignore();
+      if (accountId != null && accountId.isNotEmpty)
+        RecalculateService().recalculateAccount(accountId).ignore();
       if (mounted) widget.onSaved();
     } catch (e) {
       if (mounted) {

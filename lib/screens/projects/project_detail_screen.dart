@@ -1,15 +1,40 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../models/project_model.dart';
+import '../../models/transaction_model.dart';
+import '../../services/transaction_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/section_header.dart';
 
-class ProjectDetailScreen extends StatelessWidget {
+class ProjectDetailScreen extends StatefulWidget {
   final Project project;
 
   const ProjectDetailScreen({super.key, required this.project});
+
+  @override
+  State<ProjectDetailScreen> createState() => _ProjectDetailScreenState();
+}
+
+class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
+  List<Transaction> _transactions = [];
+  bool _loadingTxns = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTransactions();
+  }
+
+  Future<void> _loadTransactions() async {
+    try {
+      final txns = await TransactionService().getByProject(widget.project.id);
+      if (mounted) setState(() { _transactions = txns; _loadingTxns = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loadingTxns = false);
+    }
+  }
 
   String _formatMxn(double value) {
     final abs = value.abs();
@@ -74,11 +99,7 @@ class ProjectDetailScreen extends StatelessWidget {
             ],
 
             // ── Sección: Transacciones ────────────────────────────────────
-            _buildPendingSection(
-              title: 'Transacciones',
-              icon: Icons.swap_vert,
-              subtitle: 'Se mostrará cuando se migre el módulo de Transacciones',
-            ),
+            _buildTransactionsSection(),
             const SizedBox(height: 32),
 
             // ── Sección: Cotizaciones ─────────────────────────────────────
@@ -102,22 +123,22 @@ class ProjectDetailScreen extends StatelessWidget {
   }
 
   bool _hasAdditionalInfo() {
-    return project.clientPhone != null ||
-        project.startDate != null ||
-        project.endDate != null ||
-        project.budget != null ||
-        project.notes != null;
+    return widget.project.clientPhone != null ||
+        widget.project.startDate != null ||
+        widget.project.endDate != null ||
+        widget.project.budget != null ||
+        widget.project.notes != null;
   }
 
   Widget _buildProjectHeader() {
+    final p = widget.project;
     final statusColors = <String, Color>{
       'activo': AppTheme.colorExito,
       'pausado': AppTheme.colorAdvertencia,
       'completado': AppTheme.colorTextoSecundario,
       'cancelado': AppTheme.colorError,
     };
-    final statusColor =
-        statusColors[project.status] ?? AppTheme.colorTextoSecundario;
+    final statusColor = statusColors[p.status] ?? AppTheme.colorTextoSecundario;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -127,7 +148,7 @@ class ProjectDetailScreen extends StatelessWidget {
           height: 16,
           margin: const EdgeInsets.only(top: 6),
           decoration: BoxDecoration(
-            color: project.displayColor,
+            color: p.displayColor,
             shape: BoxShape.circle,
           ),
         ),
@@ -137,7 +158,7 @@ class ProjectDetailScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                project.name,
+                p.name,
                 style: GoogleFonts.inter(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
@@ -148,7 +169,7 @@ class ProjectDetailScreen extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    project.clientName,
+                    p.clientName,
                     style: GoogleFonts.inter(
                       fontSize: 14,
                       color: AppTheme.colorTextoSecundario,
@@ -163,7 +184,7 @@ class ProjectDetailScreen extends StatelessWidget {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      project.statusLabel,
+                      p.statusLabel,
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
@@ -173,11 +194,10 @@ class ProjectDetailScreen extends StatelessWidget {
                   ),
                 ],
               ),
-              if (project.description != null &&
-                  project.description!.isNotEmpty) ...[
+              if (p.description != null && p.description!.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(
-                  project.description!,
+                  p.description!,
                   style: GoogleFonts.inter(
                     fontSize: 13,
                     color: AppTheme.colorTextoSecundario,
@@ -192,12 +212,13 @@ class ProjectDetailScreen extends StatelessWidget {
   }
 
   Widget _buildStatCards() {
+    final p = widget.project;
     return Row(
       children: [
         Expanded(
           child: StatCard(
             title: 'Ingresos',
-            value: _formatMxn(project.totalIncome),
+            value: _formatMxn(p.totalIncome),
             icon: Icons.arrow_downward_outlined,
             valueColor: AppTheme.colorExito,
           ),
@@ -206,7 +227,7 @@ class ProjectDetailScreen extends StatelessWidget {
         Expanded(
           child: StatCard(
             title: 'Egresos',
-            value: _formatMxn(project.totalExpense),
+            value: _formatMxn(p.totalExpense),
             icon: Icons.arrow_upward_outlined,
             valueColor: AppTheme.colorError,
           ),
@@ -215,11 +236,9 @@ class ProjectDetailScreen extends StatelessWidget {
         Expanded(
           child: StatCard(
             title: 'Balance',
-            value: _formatMxn(project.balance),
+            value: _formatMxn(p.balance),
             icon: Icons.account_balance_wallet_outlined,
-            valueColor: project.balance >= 0
-                ? AppTheme.colorExito
-                : AppTheme.colorError,
+            valueColor: p.balance >= 0 ? AppTheme.colorExito : AppTheme.colorError,
           ),
         ),
       ],
@@ -227,6 +246,7 @@ class ProjectDetailScreen extends StatelessWidget {
   }
 
   Widget _buildInfoSection() {
+    final p = widget.project;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -238,38 +258,54 @@ class ProjectDetailScreen extends StatelessWidget {
         spacing: 32,
         runSpacing: 12,
         children: [
-          if (project.clientPhone != null)
-            _InfoChip(
-              icon: Icons.phone_outlined,
-              label: 'Teléfono',
-              value: project.clientPhone!,
-            ),
-          if (project.startDate != null)
-            _InfoChip(
-              icon: Icons.calendar_today_outlined,
-              label: 'Inicio',
-              value: _formatDate(project.startDate!),
-            ),
-          if (project.endDate != null)
-            _InfoChip(
-              icon: Icons.event_outlined,
-              label: 'Fin',
-              value: _formatDate(project.endDate!),
-            ),
-          if (project.budget != null)
-            _InfoChip(
-              icon: Icons.savings_outlined,
-              label: 'Presupuesto',
-              value: _formatMxn(project.budget!),
-            ),
-          if (project.notes != null)
-            _InfoChip(
-              icon: Icons.notes_outlined,
-              label: 'Notas',
-              value: project.notes!,
-            ),
+          if (p.clientPhone != null)
+            _InfoChip(icon: Icons.phone_outlined, label: 'Teléfono', value: p.clientPhone!),
+          if (p.startDate != null)
+            _InfoChip(icon: Icons.calendar_today_outlined, label: 'Inicio', value: _formatDate(p.startDate!)),
+          if (p.endDate != null)
+            _InfoChip(icon: Icons.event_outlined, label: 'Fin', value: _formatDate(p.endDate!)),
+          if (p.budget != null)
+            _InfoChip(icon: Icons.savings_outlined, label: 'Presupuesto', value: _formatMxn(p.budget!)),
+          if (p.notes != null)
+            _InfoChip(icon: Icons.notes_outlined, label: 'Notas', value: p.notes!),
         ],
       ),
+    );
+  }
+
+  Widget _buildTransactionsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Transacciones'),
+        const SizedBox(height: 8),
+        if (_loadingTxns)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          )
+        else if (_transactions.isEmpty)
+          EmptyState(
+            icon: Icons.swap_vert,
+            title: 'Sin transacciones',
+            subtitle: 'Este proyecto no tiene transacciones registradas',
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              color: AppTheme.colorCard,
+              borderRadius: BorderRadius.circular(AppTheme.radiusCard),
+              boxShadow: AppTheme.sombraCard,
+            ),
+            child: Column(
+              children: _transactions
+                  .map((t) => _TransactionRow(transaction: t, formatMxn: _formatMxn))
+                  .toList(),
+            ),
+          ),
+      ],
     );
   }
 
@@ -292,6 +328,92 @@ class ProjectDetailScreen extends StatelessWidget {
   }
 }
 
+// ── Fila de transacción ───────────────────────────────────────────────────────
+
+class _TransactionRow extends StatelessWidget {
+  final Transaction transaction;
+  final String Function(double) formatMxn;
+
+  const _TransactionRow({required this.transaction, required this.formatMxn});
+
+  String _fmtDate(String date) {
+    if (date.length >= 10) {
+      final parts = date.substring(0, 10).split('-');
+      if (parts.length == 3) return '${parts[2]}/${parts[1]}/${parts[0]}';
+    }
+    return date;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = transaction;
+    final isIncome = t.isIncome;
+    final color = isIncome ? AppTheme.colorExito : AppTheme.colorError;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppTheme.colorBorde)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: color.withAlpha(26),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isIncome ? Icons.arrow_downward_outlined : Icons.arrow_upward_outlined,
+              size: 14,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              t.description.isNotEmpty ? t.description : 'Sin descripción',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.colorTexto,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: color.withAlpha(20),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              isIncome ? 'Ingreso' : 'Egreso',
+              style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w500, color: color),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            _fmtDate(t.date),
+            style: GoogleFonts.inter(fontSize: 11, color: AppTheme.colorTextoSecundario),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            '${isIncome ? '+' : '-'}\$${t.amount.toStringAsFixed(0)}',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Chip de información ───────────────────────────────────────────────────────
 
 class _InfoChip extends StatelessWidget {
@@ -299,11 +421,7 @@ class _InfoChip extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoChip({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
+  const _InfoChip({required this.icon, required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -317,10 +435,7 @@ class _InfoChip extends StatelessWidget {
           children: [
             Text(
               label,
-              style: GoogleFonts.inter(
-                fontSize: 10,
-                color: AppTheme.colorTextoSecundario,
-              ),
+              style: GoogleFonts.inter(fontSize: 10, color: AppTheme.colorTextoSecundario),
             ),
             Text(
               value,

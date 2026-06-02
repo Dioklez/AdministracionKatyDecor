@@ -13,7 +13,7 @@ class TransactionService {
 
   Future<List<Transaction>> getByProject(String projectId) async {
     final records = await _pb.collection('transactions').getFullList(
-          filter: 'projectId = "$projectId"',
+          filter: 'project = "$projectId"',
           sort: '-date',
         );
     return records.map(Transaction.fromRecord).toList();

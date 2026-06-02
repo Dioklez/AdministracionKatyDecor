@@ -5,6 +5,7 @@ class Account {
   final String name;
   final String type;
   final double balance;
+  final double initialBalance;
   final String? bankName;
   final String? accountNumber;
   final bool isActive;
@@ -16,6 +17,7 @@ class Account {
     required this.name,
     required this.type,
     required this.balance,
+    required this.initialBalance,
     this.bankName,
     this.accountNumber,
     required this.isActive,
@@ -28,7 +30,8 @@ class Account {
       id: record.id,
       name: record.getStringValue('name'),
       type: record.getStringValue('type'),
-      balance: (record.getDoubleValue('balance')),
+      balance: record.getDoubleValue('balance'),
+      initialBalance: record.getDoubleValue('initial_balance'),
       bankName: record.getStringValue('bank_name').isEmpty
           ? null
           : record.getStringValue('bank_name'),

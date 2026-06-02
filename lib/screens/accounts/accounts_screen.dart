@@ -816,13 +816,16 @@ class _AccountDialogState extends State<_AccountDialog> {
       _saving = true;
       _error = null;
     });
-    final data = {
+    final amount = double.parse(_balanceController.text);
+    final data = <String, dynamic>{
       'name': _nameController.text.trim(),
       'type': _type,
-      'balance': double.parse(_balanceController.text),
+      'balance': amount,
       'bank_name': _bankNameController.text.trim(),
       'account_number': _accountNumberController.text.trim(),
       'is_active': _isActive,
+      // initial_balance solo se guarda al crear — nunca se sobreescribe al editar
+      if (!_isEditing) 'initial_balance': amount,
     };
     try {
       if (_isEditing) {
