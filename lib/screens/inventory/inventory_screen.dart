@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/inventory_item_service.dart';
 import '../../services/inventory_movement_service.dart';
 import '../../models/inventory_item_model.dart';
@@ -47,7 +49,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
       _listError = null;
     });
     try {
-      final items = await InventoryItemService().getAll();
+      final repo = context.read<LocalRepository>();
+      final items = await InventoryItemService(repo: repo).getAll();
       if (!mounted) return;
       setState(() {
         _items = items;
@@ -75,7 +78,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
       _movements = [];
     });
     try {
-      final movements = await InventoryMovementService().getByItem(id);
+      final movements = await InventoryMovementService(
+              repo: context.read<LocalRepository>())
+          .getByItem(id);
       if (mounted) {
         setState(() {
           _movements = movements;

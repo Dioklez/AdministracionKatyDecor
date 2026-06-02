@@ -199,6 +199,10 @@ class LocalRepository {
         .insert(_accountCompanion(a), mode: InsertMode.insertOrReplace);
   }
 
+  Future<void> deleteAccount(String id) async {
+    await (_db.delete(_db.localAccounts)..where((t) => t.id.equals(id))).go();
+  }
+
   LocalAccountsCompanion _accountCompanion(Account a) =>
       LocalAccountsCompanion(
         id: Value(a.id),
@@ -635,4 +639,26 @@ class LocalRepository {
         endDate: Value(s.endDate != null ? DateTime.tryParse(s.endDate!) : null),
         syncedAt: Value(DateTime.now()),
       );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // LIMPIEZA DE REGISTROS TEMPORALES
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// Borra de SQLite todos los registros con id que empiece por 'temp_'.
+  /// Se llama DESPUÉS de _refreshLocalCache() para que el registro real
+  /// ya esté en SQLite antes de eliminar el temporal — sin ventana vacía.
+  Future<void> cleanupTempRecords() async {
+    await (_db.delete(_db.localProjects)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localTransactions)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localTasks)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+    await (_db.delete(_db.localAccounts)
+          ..where((t) => t.id.like('temp_%')))
+        .go();
+  }
 }

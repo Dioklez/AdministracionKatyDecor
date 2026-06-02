@@ -15,6 +15,8 @@ import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/project_badge.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 
 class TransactionsScreen extends StatefulWidget {
   const TransactionsScreen({super.key});
@@ -280,11 +282,30 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     try {
       final projectId = t.projectId;
       final accountId = t.accountId;
-      await TransactionService().delete(t.id);
-      if (projectId != null && projectId.isNotEmpty)
-        RecalculateService().recalculateProject(projectId).ignore();
-      if (accountId != null && accountId.isNotEmpty)
-        RecalculateService().recalculateAccount(accountId).ignore();
+      final connectivity = context.read<ConnectivityService>();
+      if (connectivity.isOnline) {
+        await TransactionService().delete(t.id);
+        if (projectId != null && projectId.isNotEmpty)
+          RecalculateService().recalculateProject(projectId).ignore();
+        if (accountId != null && accountId.isNotEmpty)
+          RecalculateService().recalculateAccount(accountId).ignore();
+      } else {
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        await repo.deleteTransaction(t.id);
+        await queue.enqueue(
+          entityType: 'transactions',
+          operation: 'delete',
+          endpoint: 'transactions',
+          entityId: t.id,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Guardado localmente. Se sincronizará al reconectar.')),
+          );
+        }
+      }
       await _loadData();
     } catch (e) {
       if (mounted) {
@@ -615,12 +636,91 @@ class _TransactionDialogState extends State<_TransactionDialog> {
       'notes': _notesController.text.trim(),
     };
     try {
-      final svc = TransactionService();
-      if (widget.transaction == null) {
-        await svc.create(body);
-      } else {
-        await svc.update(widget.transaction!.id, body);
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+      final isCreate = widget.transaction == null;
+
+      if (!isCreate) {
+        // UPDATE PATH
+        final id = widget.transaction!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertTransaction(Transaction(
+            id: id,
+            description: body['description'] as String,
+            amount: (body['amount'] as num).toDouble(),
+            type: body['type'] as String,
+            date: body['date'] as String,
+            projectId: body['project'] as String?,
+            categoryId: body['category'] as String?,
+            accountId: body['account'] as String?,
+            notes: body['notes'] as String?,
+            created: widget.transaction!.created,
+            updated: DateTime.now(),
+          ));
+          await queue.enqueue(
+            entityType: 'transactions',
+            operation: 'update',
+            endpoint: 'transactions',
+            entityId: id,
+            payload: body,
+          );
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+
+        if (connectivity.isOnline) {
+          try {
+            await TransactionService(repo: repo).update(id, body);
+            final projectId = _selectedProjectId;
+            final accountId = _selectedAccountId;
+            if (projectId != null && projectId.isNotEmpty)
+              RecalculateService().recalculateProject(projectId).ignore();
+            if (accountId != null && accountId.isNotEmpty)
+              RecalculateService().recalculateAccount(accountId).ignore();
+          } catch (_) {
+            await upsertOffline();
+          }
+        } else {
+          await upsertOffline();
+        }
+        if (mounted) widget.onSaved();
+        return;
       }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertTransaction(Transaction(
+          id: tempId,
+          description: body['description'] as String,
+          amount: (body['amount'] as num).toDouble(),
+          type: body['type'] as String,
+          date: body['date'] as String,
+          projectId: body['project'] as String?,
+          categoryId: body['category'] as String?,
+          accountId: body['account'] as String?,
+          notes: body['notes'] as String?,
+          created: DateTime.now(),
+          updated: DateTime.now(),
+        ));
+        await queue.enqueue(
+          entityType: 'transactions',
+          operation: 'create',
+          endpoint: 'transactions',
+          payload: {...body, '_tempId': tempId},
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Guardado localmente. Se sincronizará al reconectar.')),
+          );
+          widget.onSaved();
+        }
+        return;
+      }
+      await TransactionService(repo: repo).create(body);
       final projectId = _selectedProjectId;
       final accountId = _selectedAccountId;
       if (projectId != null && projectId.isNotEmpty)

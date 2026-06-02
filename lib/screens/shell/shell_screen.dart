@@ -29,6 +29,7 @@ class ShellScreen extends StatefulWidget {
 
 class _ShellScreenState extends State<ShellScreen> {
   int _selectedIndex = 0;
+  int _refreshToken = 0;
 
   // Referencias guardadas en initState — no usar context.read() en dispose()
   AuthService? _authService;
@@ -69,41 +70,45 @@ class _ShellScreenState extends State<ShellScreen> {
 
   void _onConnectivityChanged() {
     if (_connectivityService?.isOnline == true) {
-      _syncService?.fullSync().then((_) {}, onError: (_) {});
+      _syncService?.fullSync().then((_) {
+        if (mounted) setState(() => _refreshToken++);
+      }, onError: (_) {});
     }
   }
 
   Widget _buildCurrentScreen() {
     switch (_selectedIndex) {
       case 0:
-        return const DashboardScreen();
+        return DashboardScreen(key: ValueKey('dash_$_refreshToken'));
       case 1:
-        return const TransactionsScreen();
+        return TransactionsScreen(key: ValueKey('txn_$_refreshToken'));
       case 2:
-        return const ProjectsScreen();
+        return ProjectsScreen(key: ValueKey('prj_$_refreshToken'));
       case 3:
-        return const TasksScreen();
+        return TasksScreen(key: ValueKey('tsk_$_refreshToken'));
       case 4:
-        return const PlaceholderScreen(
-            title: 'Reportes', icon: Icons.bar_chart_outlined);
+        return PlaceholderScreen(
+            key: ValueKey('rep_$_refreshToken'),
+            title: 'Reportes',
+            icon: Icons.bar_chart_outlined);
       case 5:
-        return const QuotesScreen();
+        return QuotesScreen(key: ValueKey('qts_$_refreshToken'));
       case 6:
-        return const SuppliersScreen();
+        return SuppliersScreen(key: ValueKey('sup_$_refreshToken'));
       case 7:
-        return const InventoryScreen();
+        return InventoryScreen(key: ValueKey('inv_$_refreshToken'));
       case 8:
-        return const AccountsScreen();
+        return AccountsScreen(key: ValueKey('acc_$_refreshToken'));
       case 9:
-        return const BudgetsScreen();
+        return BudgetsScreen(key: ValueKey('bud_$_refreshToken'));
       case 10:
-        return const RemisionesScreen();
+        return RemisionesScreen(key: ValueKey('rem_$_refreshToken'));
       case 11:
-        return const FacturasScreen();
+        return FacturasScreen(key: ValueKey('fac_$_refreshToken'));
       case 12:
-        return const CategoriesScreen();
+        return CategoriesScreen(key: ValueKey('cat_$_refreshToken'));
       default:
-        return const DashboardScreen();
+        return DashboardScreen(key: ValueKey('dash_$_refreshToken'));
     }
   }
 

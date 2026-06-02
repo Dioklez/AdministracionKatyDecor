@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/remision_service.dart';
 import '../../services/project_service.dart';
 import '../../services/supplier_service.dart';
@@ -39,10 +41,11 @@ class _RemisionesScreenState extends State<RemisionesScreen> {
       _error = null;
     });
     try {
+      final repo = context.read<LocalRepository>();
       final futures = <Future>[
-        RemisionService().getAll(),
-        if (_projects.isEmpty) ProjectService().getAll(),
-        if (_suppliers.isEmpty) SupplierService().getAll(),
+        RemisionService(repo: repo).getAll(),
+        if (_projects.isEmpty) ProjectService(repo: repo).getAll(),
+        if (_suppliers.isEmpty) SupplierService(repo: repo).getAll(),
       ];
       final results = await Future.wait(futures);
       if (!mounted) return;

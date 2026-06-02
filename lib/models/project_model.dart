@@ -99,7 +99,7 @@ class Project {
   }
 
   Map<String, dynamic> toJson() {
-    return {
+    final map = {
       'name': name,
       'client_name': clientName,
       if (clientPhone != null) 'client_phone': clientPhone,
@@ -109,7 +109,9 @@ class Project {
       if (endDate != null) 'end_date': endDate,
       if (budget != null) 'budget': budget,
       if (notes != null) 'notes': notes,
-      if (color != null) 'color': color,
+      'color': color ?? '',
     };
+    print('Project toJson: $map');
+    return map;
   }
 }

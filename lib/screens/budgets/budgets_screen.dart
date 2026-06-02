@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/budget_service.dart';
 import '../../services/category_service.dart';
 import '../../services/project_service.dart';
@@ -36,10 +38,11 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       _error = null;
     });
     try {
+      final repo = context.read<LocalRepository>();
       final futures = <Future>[
-        BudgetService().getAll(),
-        if (_categories.isEmpty) CategoryService().getAll(),
-        if (_projects.isEmpty) ProjectService().getAll(),
+        BudgetService(repo: repo).getAll(),
+        if (_categories.isEmpty) CategoryService(repo: repo).getAll(),
+        if (_projects.isEmpty) ProjectService(repo: repo).getAll(),
       ];
       final results = await Future.wait(futures);
       if (!mounted) return;

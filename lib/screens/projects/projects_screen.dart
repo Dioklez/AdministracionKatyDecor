@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../database/local_repository.dart';
 import '../../services/project_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 import '../../models/project_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/shimmer_box.dart';
@@ -241,7 +243,26 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await _service.delete(p.id);
+        final connectivity = context.read<ConnectivityService>();
+        if (connectivity.isOnline) {
+          await _service.delete(p.id);
+        } else {
+          final repo = context.read<LocalRepository>();
+          final queue = context.read<OfflineQueueService>();
+          await repo.deleteProject(p.id);
+          await queue.enqueue(
+            entityType: 'projects',
+            operation: 'delete',
+            endpoint: 'projects',
+            entityId: p.id,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text('Guardado localmente. Se sincronizará al reconectar.')),
+            );
+          }
+        }
         _loadData();
       } catch (_) {
         if (mounted) {
@@ -558,13 +579,88 @@ class _ProjectDialogState extends State<_ProjectDialog> {
       'status': _status,
       'color': _color,
     };
+    print('ProjectDialog body: $body');
+    print('Color seleccionado: $_color');
     try {
-      final service = ProjectService();
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
       if (_isEditing) {
-        await service.update(widget.editProject!.id, body);
-      } else {
-        await service.create(body);
+        final id = widget.editProject!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertProject(Project(
+            id: id,
+            name: body['name'] as String,
+            clientName: (body['client_name'] as String?) ?? '',
+            clientPhone: body['client_phone'] as String?,
+            description: body['description'] as String?,
+            status: body['status'] as String,
+            notes: body['notes'] as String?,
+            color: body['color'] as String?,
+            totalIncome: widget.editProject!.totalIncome,
+            totalExpense: widget.editProject!.totalExpense,
+            created: widget.editProject!.created,
+            updated: DateTime.now(),
+          ));
+          await queue.enqueue(
+            entityType: 'projects',
+            operation: 'update',
+            endpoint: 'projects',
+            entityId: id,
+            payload: body,
+          );
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+
+        if (connectivity.isOnline) {
+          try {
+            await ProjectService(repo: repo).update(id, body);
+          } catch (_) {
+            await upsertOffline();
+          }
+        } else {
+          await upsertOffline();
+        }
+        if (mounted) widget.onSaved();
+        return;
       }
+
+      // CREATE PATH
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertProject(Project(
+          id: tempId,
+          name: body['name'] as String,
+          clientName: (body['client_name'] as String?) ?? '',
+          clientPhone: body['client_phone'] as String?,
+          description: body['description'] as String?,
+          status: body['status'] as String,
+          notes: body['notes'] as String?,
+          color: body['color'] as String?,
+          totalIncome: 0,
+          totalExpense: 0,
+          created: DateTime.now(),
+          updated: DateTime.now(),
+        ));
+        await queue.enqueue(
+          entityType: 'projects',
+          operation: 'create',
+          endpoint: 'projects',
+          payload: {...body, '_tempId': tempId},
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Guardado localmente. Se sincronizará al reconectar.')),
+          );
+          widget.onSaved();
+        }
+        return;
+      }
+      await ProjectService(repo: repo).create(body);
       if (mounted) widget.onSaved();
     } catch (e) {
       if (mounted) {

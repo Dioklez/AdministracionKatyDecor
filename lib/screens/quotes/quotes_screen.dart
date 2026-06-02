@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/quote_service.dart';
 import '../../services/project_service.dart';
 import '../../models/quote_model.dart';
@@ -37,9 +39,10 @@ class _QuotesScreenState extends State<QuotesScreen> {
       _error = null;
     });
     try {
+      final repo = context.read<LocalRepository>();
       final futures = <Future>[
-        QuoteService().getAll(),
-        if (_projects.isEmpty) ProjectService().getAll(),
+        QuoteService(repo: repo).getAll(),
+        if (_projects.isEmpty) ProjectService(repo: repo).getAll(),
       ];
       final results = await Future.wait(futures);
       if (!mounted) return;

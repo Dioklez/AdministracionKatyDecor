@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/account_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 import '../../services/account_payment_service.dart';
 import '../../models/account_model.dart';
 import '../../models/account_payment_model.dart';
@@ -43,7 +47,8 @@ class _AccountsScreenState extends State<AccountsScreen> {
       _listError = null;
     });
     try {
-      final accounts = await AccountService().getAll();
+      final repo = context.read<LocalRepository>();
+      final accounts = await AccountService(repo: repo).getAll();
       if (!mounted) return;
       setState(() {
         _accounts = accounts;
@@ -76,7 +81,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
     print('_loadPayments llamado para: $accountId');
     setState(() => _loadingPayments = true);
     try {
-      final payments = await AccountPaymentService().getByAccount(accountId);
+      final payments = await AccountPaymentService(repo: context.read<LocalRepository>()).getByAccount(accountId);
       print('Pagos encontrados: ${payments.length}');
       if (!mounted) return;
       setState(() {
@@ -828,6 +833,42 @@ class _AccountDialogState extends State<_AccountDialog> {
       if (!_isEditing) 'initial_balance': amount,
     };
     try {
+      final connectivity = context.read<ConnectivityService>();
+      if (!_isEditing && !connectivity.isOnline) {
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertAccount(Account(
+          id: tempId,
+          name: data['name'] as String,
+          type: data['type'] as String,
+          balance: (data['balance'] as num).toDouble(),
+          initialBalance: (data['initial_balance'] as num).toDouble(),
+          bankName: (data['bank_name'] as String).isNotEmpty
+              ? data['bank_name'] as String
+              : null,
+          accountNumber: (data['account_number'] as String).isNotEmpty
+              ? data['account_number'] as String
+              : null,
+          isActive: data['is_active'] as bool,
+          created: DateTime.now(),
+          updated: DateTime.now(),
+        ));
+        await queue.enqueue(
+          entityType: 'accounts',
+          operation: 'create',
+          endpoint: 'accounts',
+          payload: {...data, '_tempId': tempId},
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Guardado localmente. Se sincronizará al reconectar.')),
+          );
+          widget.onSaved();
+        }
+        return;
+      }
       if (_isEditing) {
         await AccountService().update(widget.editAccount!.id, data);
       } else {

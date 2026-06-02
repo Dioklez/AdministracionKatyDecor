@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/supplier_service.dart';
 import '../../services/supplier_product_service.dart';
 import '../../models/supplier_model.dart';
@@ -44,7 +46,8 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       _listError = null;
     });
     try {
-      final suppliers = await SupplierService().getAll();
+      final repo = context.read<LocalRepository>();
+      final suppliers = await SupplierService(repo: repo).getAll();
       if (!mounted) return;
       setState(() {
         _suppliers = suppliers;
@@ -71,8 +74,9 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   Future<void> _loadProducts(String supplierId) async {
     setState(() => _loadingProducts = true);
     try {
-      final products =
-          await SupplierProductService().getBySupplier(supplierId);
+      final products = await SupplierProductService(
+              repo: context.read<LocalRepository>())
+          .getBySupplier(supplierId);
       if (mounted) {
         setState(() {
           _products = products;

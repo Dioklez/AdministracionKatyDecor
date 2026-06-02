@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../models/project_model.dart';
 import '../../models/project_stage_model.dart';
 import '../../models/transaction_model.dart';
@@ -35,7 +37,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
 
   Future<void> _loadTransactions() async {
     try {
-      final txns = await TransactionService().getByProject(widget.project.id);
+      final repo = context.read<LocalRepository>();
+      final txns = await TransactionService(repo: repo).getByProject(widget.project.id);
       if (mounted) setState(() { _transactions = txns; _loadingTxns = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingTxns = false);
@@ -44,7 +47,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
 
   Future<void> _loadStages() async {
     try {
-      final stages = await ProjectStageService().getByProject(widget.project.id);
+      final repo = context.read<LocalRepository>();
+      final stages = await ProjectStageService(repo: repo).getByProject(widget.project.id);
       if (mounted) setState(() { _stages = stages; _loadingStages = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingStages = false);

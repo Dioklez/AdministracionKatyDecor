@@ -7,6 +7,7 @@ import '../database/local_repository.dart';
 class OfflineQueueService {
   final AppDatabase _db;
   final LocalRepository _repo;
+  bool _isProcessing = false;
 
   OfflineQueueService(this._db, this._repo);
 
@@ -32,21 +33,28 @@ class OfflineQueueService {
   }
 
   /// Procesa todas las operaciones pendientes en orden FIFO.
+  /// Usa un lock para evitar ejecuciones simultáneas.
   Future<void> processPendingOps() async {
-    final ops = await (_db.select(_db.pendingOps)
-          ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
-        .get();
+    if (_isProcessing) {
+      print('OfflineQueue: ya está procesando, ignorando llamada duplicada');
+      return;
+    }
+    _isProcessing = true;
+    try {
+      final ops = await (_db.select(_db.pendingOps)
+            ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
+          .get();
 
-    for (final op in ops) {
-      try {
-        await _processOp(op);
-        await (_db.delete(_db.pendingOps)
-              ..where((t) => t.id.equals(op.id)))
-            .go();
-      } catch (_) {
-        await (_db.update(_db.pendingOps)..where((t) => t.id.equals(op.id)))
-            .write(PendingOpsCompanion(retries: Value(op.retries + 1)));
+      for (final op in ops) {
+        try {
+          await _processOp(op);
+        } catch (_) {
+          // La op ya fue borrada de PendingOps antes de llamar a PocketBase.
+          // No hay nada que reintentar — se registra el error silenciosamente.
+        }
       }
+    } finally {
+      _isProcessing = false;
     }
   }
 
@@ -58,21 +66,30 @@ class OfflineQueueService {
         ? jsonDecode(op.payload!) as Map<String, dynamic>
         : <String, dynamic>{};
 
-    // Extraer entityId que fue guardado dentro del payload
     final payload = Map<String, dynamic>.from(rawPayload);
-    final entityId = payload.remove('_id') as String?;
+    final entityId = payload.remove('_id') as String?;  // para update/delete
+    final tempId = payload.remove('_tempId') as String?; // extraer antes de enviar a PocketBase
 
     switch (op.operation) {
       case 'create':
-        await pb.collection(collection).create(body: payload);
+        print('OfflineQueue: creando en PocketBase colección: $collection');
+        print('OfflineQueue: tempId en payload: $tempId');
+        // Borrar ANTES de crear — evita duplicados si la app falla a medias
+        await (_db.delete(_db.pendingOps)..where((t) => t.id.equals(op.id))).go();
+        final record = await pb.collection(collection).create(body: payload);
+        print('OfflineQueue: registro creado con ID real: ${record.id}');
+        // El registro temp_ se borra en SyncService.cleanupTempRecords()
+        // DESPUÉS de _refreshLocalCache(), para evitar ventana de lista vacía.
         break;
       case 'update':
         if (entityId != null) {
+          await (_db.delete(_db.pendingOps)..where((t) => t.id.equals(op.id))).go();
           await pb.collection(collection).update(entityId, body: payload);
         }
         break;
       case 'delete':
         if (entityId != null) {
+          await (_db.delete(_db.pendingOps)..where((t) => t.id.equals(op.id))).go();
           await pb.collection(collection).delete(entityId);
         }
         break;

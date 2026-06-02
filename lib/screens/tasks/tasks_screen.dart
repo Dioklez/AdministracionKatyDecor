@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../database/local_repository.dart';
 import '../../services/task_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
 import '../../services/project_service.dart';
 import '../../models/task_model.dart';
 import '../../models/project_model.dart';
@@ -118,9 +120,41 @@ class _TasksScreenState extends State<TasksScreen> {
 
   Future<void> _toggleTask(Task task) async {
     try {
-      await _taskService.update(task.id, {
-        'status': task.isCompleted ? 'pendiente' : 'completado',
-      });
+      final newStatus = task.isCompleted ? 'pendiente' : 'completado';
+      final connectivity = context.read<ConnectivityService>();
+      if (connectivity.isOnline) {
+        await _taskService.update(task.id, {'status': newStatus});
+      } else {
+        final repo = context.read<LocalRepository>();
+        final queue = context.read<OfflineQueueService>();
+        await repo.upsertTask(Task(
+          id: task.id,
+          title: task.title,
+          description: task.description,
+          projectId: task.projectId,
+          stageId: task.stageId,
+          status: newStatus,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          completedAt: task.completedAt,
+          notes: task.notes,
+          created: task.created,
+          updated: DateTime.now(),
+        ));
+        await queue.enqueue(
+          entityType: 'tasks',
+          operation: 'update',
+          endpoint: 'tasks',
+          entityId: task.id,
+          payload: {'status': newStatus},
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Guardado localmente. Se sincronizará al reconectar.')),
+          );
+        }
+      }
       await _loadData();
     } catch (_) {
       if (mounted) {
@@ -159,7 +193,26 @@ class _TasksScreenState extends State<TasksScreen> {
     );
     if (confirmed == true && mounted) {
       try {
-        await _taskService.delete(task.id);
+        final connectivity = context.read<ConnectivityService>();
+        if (connectivity.isOnline) {
+          await _taskService.delete(task.id);
+        } else {
+          final repo = context.read<LocalRepository>();
+          final queue = context.read<OfflineQueueService>();
+          await repo.deleteTask(task.id);
+          await queue.enqueue(
+            entityType: 'tasks',
+            operation: 'delete',
+            endpoint: 'tasks',
+            entityId: task.id,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text('Guardado localmente. Se sincronizará al reconectar.')),
+            );
+          }
+        }
         await _loadData();
       } catch (_) {
         if (mounted) {
@@ -684,13 +737,83 @@ class _TaskDialogState extends State<_TaskDialog> {
         'notes': _notesController.text.trim(),
     };
     try {
-      final service = TaskService();
+      final connectivity = context.read<ConnectivityService>();
+      final repo = context.read<LocalRepository>();
+      final queue = context.read<OfflineQueueService>();
+
       if (_isEditing) {
-        await service.update(widget.editTask!.id, body);
-      } else {
-        body['status'] = 'pendiente';
-        await service.create(body);
+        final id = widget.editTask!.id;
+        Future<void> upsertOffline() async {
+          await repo.upsertTask(Task(
+            id: id,
+            title: body['title'] as String,
+            description: widget.editTask!.description,
+            projectId: body['projectId'] as String?,
+            stageId: widget.editTask!.stageId,
+            status: widget.editTask!.status,
+            priority: body['priority'] as String,
+            dueDate: body['dueDate'] as String?,
+            completedAt: widget.editTask!.completedAt,
+            notes: body['notes'] as String?,
+            created: widget.editTask!.created,
+            updated: DateTime.now(),
+          ));
+          await queue.enqueue(
+            entityType: 'tasks',
+            operation: 'update',
+            endpoint: 'tasks',
+            entityId: id,
+            payload: body,
+          );
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Guardado localmente. Se sincronizará al reconectar.')));
+        }
+
+        if (connectivity.isOnline) {
+          try {
+            await TaskService(repo: repo).update(id, body);
+          } catch (_) {
+            await upsertOffline();
+          }
+        } else {
+          await upsertOffline();
+        }
+        if (mounted) widget.onSaved();
+        return;
       }
+
+      // CREATE PATH
+      body['status'] = 'pendiente';
+      if (!connectivity.isOnline) {
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        await repo.upsertTask(Task(
+          id: tempId,
+          title: body['title'] as String,
+          projectId: body['projectId'] as String?,
+          status: 'pendiente',
+          priority: body['priority'] as String,
+          dueDate: body['dueDate'] as String?,
+          notes: body['notes'] as String?,
+          created: DateTime.now(),
+          updated: DateTime.now(),
+        ));
+        await queue.enqueue(
+          entityType: 'tasks',
+          operation: 'create',
+          endpoint: 'tasks',
+          payload: {...body, '_tempId': tempId},
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Guardado localmente. Se sincronizará al reconectar.')),
+          );
+          widget.onSaved();
+        }
+        return;
+      }
+      await TaskService(repo: repo).create(body);
       if (mounted) widget.onSaved();
     } catch (e) {
       if (mounted) {

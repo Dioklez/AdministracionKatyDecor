@@ -15,6 +15,7 @@ import 'inventory_movement_service.dart';
 import 'account_payment_service.dart';
 import 'remision_service.dart';
 import 'project_stage_service.dart';
+import 'recalculate_service.dart';
 
 class SyncService {
   final OfflineQueueService _queue;
@@ -29,8 +30,21 @@ class SyncService {
   /// sube operaciones pendientes y refresca el caché local.
   Future<void> syncOnReconnect() async {
     if (!_connectivity.isOnline) return;
-    await _queue.processPendingOps();
-    await _refreshLocalCache();
+    await _queue.processPendingOps();       // 1. sube cambios offline a PocketBase
+    await _refreshLocalCache();             // 2. descarga todos los registros reales
+    await _repo.cleanupTempRecords();       // 3. borra temp_ ahora que el real ya existe
+    await _recalculateAllProjects();        // 4. actualiza totales en PocketBase
+  }
+
+  Future<void> _recalculateAllProjects() async {
+    try {
+      final projects = await ProjectService(repo: _repo).getAll();
+      for (final p in projects) {
+        await RecalculateService().recalculateProject(p.id);
+      }
+    } catch (_) {
+      // best-effort — no interrumpir el flujo si falla
+    }
   }
 
   /// Alias para backward-compat con código existente.

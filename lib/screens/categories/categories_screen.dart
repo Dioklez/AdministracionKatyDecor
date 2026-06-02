@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../database/local_repository.dart';
 import '../../services/category_service.dart';
 import '../../models/category_model.dart';
 import '../../theme/app_theme.dart';
@@ -30,7 +32,8 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
   Future<void> _loadCategories() async {
     setState(() { _loadingList = true; _listError = null; });
     try {
-      final cats = await CategoryService().getAll();
+      final repo = context.read<LocalRepository>();
+      final cats = await CategoryService(repo: repo).getAll();
       if (!mounted) return;
       setState(() { _categories = cats; _loadingList = false; });
     } catch (_) {
