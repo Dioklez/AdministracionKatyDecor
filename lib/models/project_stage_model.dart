@@ -5,7 +5,7 @@ class ProjectStage {
   final String projectId;
   final String name;
   final String? description;
-  final String status; // 'pendiente' | 'activo' | 'completado'
+  final String status; // 'pendiente' | 'en_progreso' | 'completado'
   final int order;
   final String? startDate;
   final String? endDate;
@@ -27,8 +27,8 @@ class ProjectStage {
 
   String get statusLabel {
     switch (status) {
-      case 'activo':
-        return 'Activo';
+      case 'en_progreso':
+        return 'En progreso';
       case 'completado':
         return 'Completado';
       default:

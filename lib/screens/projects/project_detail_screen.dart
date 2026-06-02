@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../models/project_model.dart';
+import '../../models/project_stage_model.dart';
 import '../../models/transaction_model.dart';
+import '../../services/project_stage_service.dart';
 import '../../services/transaction_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/stat_card.dart';
@@ -21,10 +23,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   List<Transaction> _transactions = [];
   bool _loadingTxns = true;
 
+  List<ProjectStage> _stages = [];
+  bool _loadingStages = true;
+
   @override
   void initState() {
     super.initState();
     _loadTransactions();
+    _loadStages();
   }
 
   Future<void> _loadTransactions() async {
@@ -33,6 +39,15 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       if (mounted) setState(() { _transactions = txns; _loadingTxns = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingTxns = false);
+    }
+  }
+
+  Future<void> _loadStages() async {
+    try {
+      final stages = await ProjectStageService().getByProject(widget.project.id);
+      if (mounted) setState(() { _stages = stages; _loadingStages = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loadingStages = false);
     }
   }
 
@@ -61,6 +76,46 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       if (parts.length == 3) return '${parts[2]}/${parts[1]}/${parts[0]}';
     }
     return date;
+  }
+
+  void _openStageDialog({ProjectStage? stage}) {
+    showDialog(
+      context: context,
+      builder: (_) => _StageDialog(
+        projectId: widget.project.id,
+        stage: stage,
+        onSaved: _loadStages,
+      ),
+    );
+  }
+
+  Future<void> _deleteStage(ProjectStage stage) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Eliminar etapa', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+        content: Text('¿Eliminar "${stage.name}"? Esta acción no se puede deshacer.',
+            style: GoogleFonts.inter()),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.colorError),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ProjectStageService().delete(stage.id);
+      _loadStages();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al eliminar: $e'), backgroundColor: AppTheme.colorError),
+      );
+    }
   }
 
   @override
@@ -97,6 +152,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               _buildInfoSection(),
               const SizedBox(height: 32),
             ],
+
+            // ── Sección: Etapas ───────────────────────────────────────────
+            _buildStagesSection(),
+            const SizedBox(height: 32),
 
             // ── Sección: Transacciones ────────────────────────────────────
             _buildTransactionsSection(),
@@ -273,6 +332,72 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     );
   }
 
+  Widget _buildStagesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header con botón
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Etapas',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.colorTextoSecundario,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => _openStageDialog(),
+              icon: const Icon(Icons.add, size: 15),
+              label: const Text('Nueva etapa'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.colorPrimario,
+                textStyle: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_loadingStages)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          )
+        else if (_stages.isEmpty)
+          EmptyState(
+            icon: Icons.timeline_outlined,
+            title: 'Sin etapas',
+            subtitle: 'Agrega etapas para organizar el avance del proyecto',
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              color: AppTheme.colorCard,
+              borderRadius: BorderRadius.circular(AppTheme.radiusCard),
+              boxShadow: AppTheme.sombraCard,
+            ),
+            child: Column(
+              children: _stages
+                  .map((s) => _StageRow(
+                        stage: s,
+                        formatDate: _formatDate,
+                        onEdit: () => _openStageDialog(stage: s),
+                        onDelete: () => _deleteStage(s),
+                      ))
+                  .toList(),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildTransactionsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,6 +447,423 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
           icon: icon,
           title: 'Pendiente de migración',
           subtitle: subtitle,
+        ),
+      ],
+    );
+  }
+}
+
+// ── Fila de etapa ─────────────────────────────────────────────────────────────
+
+class _StageRow extends StatelessWidget {
+  final ProjectStage stage;
+  final String Function(String) formatDate;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _StageRow({
+    required this.stage,
+    required this.formatDate,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'en_progreso':
+        return AppTheme.colorAdvertencia;
+      case 'completado':
+        return AppTheme.colorExito;
+      default:
+        return AppTheme.colorTextoSecundario;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = stage;
+    final color = _statusColor(s.status);
+    final isLast = false; // handled by container border
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppTheme.colorBorde)),
+      ),
+      child: Row(
+        children: [
+          // Número de orden
+          SizedBox(
+            width: 24,
+            child: Text(
+              '${s.order}',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.colorTextoSecundario,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Nombre y fechas
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.name,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.colorTexto,
+                  ),
+                ),
+                if (s.startDate != null || s.endDate != null) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      if (s.startDate != null)
+                        Text(
+                          'Inicio: ${formatDate(s.startDate!)}',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppTheme.colorTextoSecundario,
+                          ),
+                        ),
+                      if (s.startDate != null && s.endDate != null)
+                        const SizedBox(width: 12),
+                      if (s.endDate != null)
+                        Text(
+                          'Fin: ${formatDate(s.endDate!)}',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppTheme.colorTextoSecundario,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Badge de status
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: color.withAlpha(25),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              s.statusLabel,
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: color,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          // Menú tres puntos
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, size: 18, color: AppTheme.colorTextoSecundario),
+            onSelected: (value) {
+              if (value == 'edit') onEdit();
+              if (value == 'delete') onDelete();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'edit',
+                child: Row(children: [
+                  const Icon(Icons.edit_outlined, size: 16),
+                  const SizedBox(width: 8),
+                  Text('Editar', style: GoogleFonts.inter(fontSize: 13)),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(children: [
+                  Icon(Icons.delete_outline, size: 16, color: AppTheme.colorError),
+                  const SizedBox(width: 8),
+                  Text('Eliminar',
+                      style: GoogleFonts.inter(fontSize: 13, color: AppTheme.colorError)),
+                ]),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Dialog de etapa ───────────────────────────────────────────────────────────
+
+class _StageDialog extends StatefulWidget {
+  final String projectId;
+  final ProjectStage? stage;
+  final VoidCallback onSaved;
+
+  const _StageDialog({
+    required this.projectId,
+    this.stage,
+    required this.onSaved,
+  });
+
+  @override
+  State<_StageDialog> createState() => _StageDialogState();
+}
+
+class _StageDialogState extends State<_StageDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _orderController = TextEditingController();
+  final _descController = TextEditingController();
+
+  String _status = 'pendiente';
+  DateTime? _startDate;
+  DateTime? _endDate;
+  bool _saving = false;
+
+  bool get _isEditing => widget.stage != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.stage;
+    if (s != null) {
+      _nameController.text = s.name;
+      _orderController.text = s.order > 0 ? '${s.order}' : '';
+      _descController.text = s.description ?? '';
+      _status = s.status;
+      if (s.startDate != null) _startDate = DateTime.tryParse(s.startDate!);
+      if (s.endDate != null) _endDate = DateTime.tryParse(s.endDate!);
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _orderController.dispose();
+    _descController.dispose();
+    super.dispose();
+  }
+
+  String _dateLabel(DateTime? d) {
+    if (d == null) return 'Seleccionar';
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
+  String _toIso(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  Future<void> _pickDate({required bool isStart}) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: (isStart ? _startDate : _endDate) ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (isStart) _startDate = picked;
+      else _endDate = picked;
+    });
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+
+    final body = <String, dynamic>{
+      'project': widget.projectId,
+      'name': _nameController.text.trim(),
+      'status': _status,
+      'order': int.tryParse(_orderController.text.trim()) ?? 0,
+    };
+    final desc = _descController.text.trim();
+    if (desc.isNotEmpty) body['description'] = desc;
+    if (_startDate != null) body['start_date'] = _toIso(_startDate!);
+    if (_endDate != null) body['end_date'] = _toIso(_endDate!);
+
+    try {
+      final svc = ProjectStageService();
+      if (_isEditing) {
+        await svc.update(widget.stage!.id, body);
+      } else {
+        await svc.create(body);
+      }
+      if (mounted) {
+        Navigator.of(context).pop();
+        widget.onSaved();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.colorError),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        _isEditing ? 'Editar etapa' : 'Nueva etapa',
+        style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
+      ),
+      content: SizedBox(
+        width: 420,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Nombre
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(labelText: 'Nombre *'),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+              ),
+              const SizedBox(height: 16),
+
+              // Status
+              DropdownButtonFormField<String>(
+                value: _status,
+                decoration: const InputDecoration(labelText: 'Estado'),
+                items: const [
+                  DropdownMenuItem(value: 'pendiente', child: Text('Pendiente')),
+                  DropdownMenuItem(value: 'en_progreso', child: Text('En progreso')),
+                  DropdownMenuItem(value: 'completado', child: Text('Completado')),
+                ],
+                onChanged: (v) => setState(() => _status = v ?? 'pendiente'),
+              ),
+              const SizedBox(height: 16),
+
+              // Orden
+              TextFormField(
+                controller: _orderController,
+                decoration: const InputDecoration(labelText: 'Orden (opcional)'),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+
+              // Fechas
+              Row(
+                children: [
+                  Expanded(
+                    child: _DatePickerField(
+                      label: 'Fecha inicio',
+                      value: _dateLabel(_startDate),
+                      onTap: () => _pickDate(isStart: true),
+                      onClear: _startDate != null
+                          ? () => setState(() => _startDate = null)
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _DatePickerField(
+                      label: 'Fecha fin',
+                      value: _dateLabel(_endDate),
+                      onTap: () => _pickDate(isStart: false),
+                      onClear: _endDate != null
+                          ? () => setState(() => _endDate = null)
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Descripción
+              TextFormField(
+                controller: _descController,
+                decoration: const InputDecoration(labelText: 'Descripción (opcional)'),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : Text(_isEditing ? 'Guardar' : 'Crear'),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Campo date picker ─────────────────────────────────────────────────────────
+
+class _DatePickerField extends StatelessWidget {
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+  final VoidCallback? onClear;
+
+  const _DatePickerField({
+    required this.label,
+    required this.value,
+    required this.onTap,
+    this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(fontSize: 12, color: AppTheme.colorTextoSecundario),
+        ),
+        const SizedBox(height: 4),
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              border: Border.all(color: AppTheme.colorBorde),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    value,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: value == 'Seleccionar'
+                          ? AppTheme.colorTextoSecundario
+                          : AppTheme.colorTexto,
+                    ),
+                  ),
+                ),
+                if (onClear != null)
+                  GestureDetector(
+                    onTap: onClear,
+                    child: const Icon(Icons.close, size: 14, color: AppTheme.colorTextoSecundario),
+                  )
+                else
+                  const Icon(Icons.calendar_today_outlined,
+                      size: 14, color: AppTheme.colorTextoSecundario),
+              ],
+            ),
+          ),
         ),
       ],
     );

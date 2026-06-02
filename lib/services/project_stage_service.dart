@@ -13,7 +13,7 @@ class ProjectStageService {
 
   Future<List<ProjectStage>> getByProject(String projectId) async {
     final records = await _pb.collection('project_stages').getFullList(
-          filter: 'projectId = "$projectId"',
+          filter: 'project = "$projectId"',
           sort: 'order',
         );
     return records.map(ProjectStage.fromRecord).toList();
