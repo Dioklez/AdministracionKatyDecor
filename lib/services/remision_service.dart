@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/remision_model.dart';
+import 'connectivity_service.dart';
 
 class RemisionService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class RemisionService {
   RemisionService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<Remision>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getRemisiones()).map(_remisionFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('remisiones').getFullList(
             sort: '-created',

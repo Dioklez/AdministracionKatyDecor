@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/transaction_model.dart';
+import 'connectivity_service.dart';
 
 class TransactionService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class TransactionService {
   TransactionService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<Transaction>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getTransactions()).map(_txFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('transactions').getFullList(
             sort: '-date',
@@ -27,6 +34,13 @@ class TransactionService {
   }
 
   Future<List<Transaction>> getByProject(String projectId) async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        final local = await _repo.getTransactionsByProject(projectId);
+        return local.map(_txFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('transactions').getFullList(
             filter: 'project = "$projectId"',

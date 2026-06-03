@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/inventory_item_model.dart';
+import 'connectivity_service.dart';
 
 class InventoryItemService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class InventoryItemService {
   InventoryItemService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<InventoryItem>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getInventoryItems()).map(_itemFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb
           .collection('inventory_items')

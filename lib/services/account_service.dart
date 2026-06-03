@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/account_model.dart';
+import 'connectivity_service.dart';
 
 class AccountService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class AccountService {
   AccountService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<Account>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getAccounts()).map(_accountFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('accounts').getFullList(
             sort: 'name',

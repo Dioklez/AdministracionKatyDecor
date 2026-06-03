@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/account_payment_model.dart';
+import 'connectivity_service.dart';
 
 class AccountPaymentService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class AccountPaymentService {
   AccountPaymentService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<AccountPayment>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getAccountPayments()).map(_paymentFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('account_payments').getFullList(
             sort: '-date',
@@ -27,6 +34,13 @@ class AccountPaymentService {
   }
 
   Future<List<AccountPayment>> getByAccount(String accountId) async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        final local = await _repo.getPaymentsByAccount(accountId);
+        return local.map(_paymentFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('account_payments').getFullList(
             filter: "account='$accountId'",

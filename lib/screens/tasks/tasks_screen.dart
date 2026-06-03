@@ -52,6 +52,10 @@ class _TasksScreenState extends State<TasksScreen> {
       final results = await Future.wait(futures);
       if (!mounted) return;
       final taskList = results[0] as List<Task>;
+      print('Tasks cargadas: ${taskList.length}');
+      for (final t in taskList) {
+        print('  - ${t.title} | projectId: ${t.projectId} | dueDate: ${t.dueDate}');
+      }
       if (results.length > 1) {
         _projects = results[1] as List<Project>;
       }
@@ -730,12 +734,13 @@ class _TaskDialogState extends State<_TaskDialog> {
     });
     final body = <String, dynamic>{
       'title': _titleController.text.trim(),
-      if (_selectedProjectId != null) 'projectId': _selectedProjectId,
+      if (_selectedProjectId != null) 'project': _selectedProjectId,
       'priority': _priority,
-      if (_dueDate != null) 'dueDate': _dueDate!.toIso8601String().substring(0, 10),
+      if (_dueDate != null) 'due_date': _dueDate!.toIso8601String().substring(0, 10),
       if (_notesController.text.trim().isNotEmpty)
         'notes': _notesController.text.trim(),
     };
+    print('Task body: $body');
     try {
       final connectivity = context.read<ConnectivityService>();
       final repo = context.read<LocalRepository>();
@@ -744,20 +749,22 @@ class _TaskDialogState extends State<_TaskDialog> {
       if (_isEditing) {
         final id = widget.editTask!.id;
         Future<void> upsertOffline() async {
-          await repo.upsertTask(Task(
+          final task = Task(
             id: id,
             title: body['title'] as String,
             description: widget.editTask!.description,
-            projectId: body['projectId'] as String?,
+            projectId: body['project'] as String?,
             stageId: widget.editTask!.stageId,
             status: widget.editTask!.status,
             priority: body['priority'] as String,
-            dueDate: body['dueDate'] as String?,
+            dueDate: body['due_date'] as String?,
             completedAt: widget.editTask!.completedAt,
             notes: body['notes'] as String?,
             created: widget.editTask!.created,
             updated: DateTime.now(),
-          ));
+          );
+          print('Task local upsert - projectId: ${task.projectId}, dueDate: ${task.dueDate}');
+          await repo.upsertTask(task);
           await queue.enqueue(
             entityType: 'tasks',
             operation: 'update',
@@ -787,17 +794,19 @@ class _TaskDialogState extends State<_TaskDialog> {
       body['status'] = 'pendiente';
       if (!connectivity.isOnline) {
         final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
-        await repo.upsertTask(Task(
+        final task = Task(
           id: tempId,
           title: body['title'] as String,
-          projectId: body['projectId'] as String?,
+          projectId: body['project'] as String?,
           status: 'pendiente',
           priority: body['priority'] as String,
-          dueDate: body['dueDate'] as String?,
+          dueDate: body['due_date'] as String?,
           notes: body['notes'] as String?,
           created: DateTime.now(),
           updated: DateTime.now(),
-        ));
+        );
+        print('Task local upsert - projectId: ${task.projectId}, dueDate: ${task.dueDate}');
+        await repo.upsertTask(task);
         await queue.enqueue(
           entityType: 'tasks',
           operation: 'create',

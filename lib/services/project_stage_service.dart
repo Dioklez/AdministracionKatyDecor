@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/project_stage_model.dart';
+import 'connectivity_service.dart';
 
 class ProjectStageService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class ProjectStageService {
   ProjectStageService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<ProjectStage>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getProjectStages()).map(_stageFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('project_stages').getFullList(
             sort: 'order',
@@ -27,6 +34,13 @@ class ProjectStageService {
   }
 
   Future<List<ProjectStage>> getByProject(String projectId) async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        final local = await _repo.getStagesByProject(projectId);
+        return local.map(_stageFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('project_stages').getFullList(
             filter: 'project = "$projectId"',

@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/supplier_model.dart';
+import 'connectivity_service.dart';
 
 class SupplierService {
   final _pb = PocketBaseService.instance.pb;
@@ -22,6 +23,12 @@ class SupplierService {
   }
 
   Future<List<Supplier>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getSuppliers()).map(_supplierFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('suppliers').getFullList(
             sort: 'name',

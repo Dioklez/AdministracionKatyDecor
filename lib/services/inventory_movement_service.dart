@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/inventory_movement_model.dart';
+import 'connectivity_service.dart';
 
 class InventoryMovementService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class InventoryMovementService {
   InventoryMovementService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<InventoryMovement>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getInventoryMovements()).map(_movementFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb
           .collection('inventory_movements')
@@ -27,6 +34,13 @@ class InventoryMovementService {
   }
 
   Future<List<InventoryMovement>> getByItem(String inventoryItemId) async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        final local = await _repo.getMovementsByItem(inventoryItemId);
+        return local.map(_movementFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('inventory_movements').getFullList(
             filter: 'inventory_item = "$inventoryItemId"',

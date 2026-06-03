@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/project_model.dart';
+import 'connectivity_service.dart';
 
 class ProjectService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class ProjectService {
   ProjectService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<Project>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getProjects()).map(_projectFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('projects').getFullList(
             sort: '-created',

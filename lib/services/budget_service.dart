@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/budget_model.dart';
+import 'connectivity_service.dart';
 
 class BudgetService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class BudgetService {
   BudgetService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<Budget>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getBudgets()).map(_budgetFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('budgets').getFullList(
             sort: '-created',

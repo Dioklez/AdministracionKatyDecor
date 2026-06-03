@@ -326,9 +326,11 @@ class LocalRepository {
   }
 
   Future<void> upsertTask(Task t) async {
+    print('upsertTask: id=${t.id}, title=${t.title}');
     await _db
         .into(_db.localTasks)
         .insert(_taskCompanion(t), mode: InsertMode.insertOrReplace);
+    print('upsertTask completado');
   }
 
   Future<void> deleteTask(String id) async {

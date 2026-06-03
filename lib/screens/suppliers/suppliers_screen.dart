@@ -1043,38 +1043,44 @@ class _SupplierDialogState extends State<_SupplierDialog> {
     });
     final data = {
       'name': _nameController.text.trim(),
-      'contactName': _contactNameController.text.trim(),
+      'contact_name': _contactNameController.text.trim(),
       'phone': _phoneController.text.trim(),
       'email': _emailController.text.trim(),
       'address': _addressController.text.trim(),
       'notes': _notesController.text.trim(),
-      'isActive': _isActive,
+      'is_active': _isActive,
     };
     try {
       final connectivity = context.read<ConnectivityService>();
       final repo = context.read<LocalRepository>();
       final queue = context.read<OfflineQueueService>();
 
-      Supplier _supplierFromData(String id, {required DateTime created}) => Supplier(
-        id: id,
-        name: data['name'] as String,
-        contactName: (data['contactName'] as String).isNotEmpty
-            ? data['contactName'] as String : null,
-        phone: (data['phone'] as String).isNotEmpty ? data['phone'] as String : null,
-        email: (data['email'] as String).isNotEmpty ? data['email'] as String : null,
-        address: (data['address'] as String).isNotEmpty
-            ? data['address'] as String : null,
-        notes: (data['notes'] as String).isNotEmpty ? data['notes'] as String : null,
-        isActive: data['isActive'] as bool,
-        created: created,
-        updated: DateTime.now(),
-      );
+      Supplier _supplierFromData(String id, {required DateTime created}) {
+        final contactName = (data['contact_name'] as String? ?? '').trim();
+        final phone = (data['phone'] as String? ?? '').trim();
+        final email = (data['email'] as String? ?? '').trim();
+        final address = (data['address'] as String? ?? '').trim();
+        final notes = (data['notes'] as String? ?? '').trim();
+        return Supplier(
+          id: id,
+          name: data['name'] as String,
+          contactName: contactName.isNotEmpty ? contactName : null,
+          phone: phone.isNotEmpty ? phone : null,
+          email: email.isNotEmpty ? email : null,
+          address: address.isNotEmpty ? address : null,
+          notes: notes.isNotEmpty ? notes : null,
+          isActive: data['is_active'] as bool? ?? true,
+          created: created,
+          updated: DateTime.now(),
+        );
+      }
 
       if (_isEditing) {
         final id = widget.editSupplier!.id;
         Future<void> upsertOffline() async {
-          await repo.upsertSupplier(_supplierFromData(id,
-              created: widget.editSupplier!.created));
+          final supplier = _supplierFromData(id, created: widget.editSupplier!.created);
+          print('Supplier offline upsert: contactName=${supplier.contactName}, isActive=${supplier.isActive}');
+          await repo.upsertSupplier(supplier);
           await queue.enqueue(entityType: 'suppliers', operation: 'update',
               endpoint: 'suppliers', entityId: id, payload: data);
           if (mounted) ScaffoldMessenger.of(context).showSnackBar(
@@ -1082,7 +1088,10 @@ class _SupplierDialogState extends State<_SupplierDialog> {
         }
         if (connectivity.isOnline) {
           try { await SupplierService(repo: repo).update(id, data); }
-          catch (_) { await upsertOffline(); }
+          catch (e) {
+            print('SupplierService error: $e');
+            await upsertOffline();
+          }
         } else { await upsertOffline(); }
         if (mounted) widget.onSaved();
         return;
@@ -1091,8 +1100,9 @@ class _SupplierDialogState extends State<_SupplierDialog> {
       // CREATE PATH
       if (!connectivity.isOnline) {
         final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
-        await repo.upsertSupplier(_supplierFromData(tempId,
-            created: DateTime.now()));
+        final supplier = _supplierFromData(tempId, created: DateTime.now());
+        print('Supplier offline upsert: contactName=${supplier.contactName}, isActive=${supplier.isActive}');
+        await repo.upsertSupplier(supplier);
         await queue.enqueue(entityType: 'suppliers', operation: 'create',
             endpoint: 'suppliers', payload: {...data, '_tempId': tempId});
         if (mounted) {
@@ -1104,9 +1114,12 @@ class _SupplierDialogState extends State<_SupplierDialog> {
       }
       try {
         await SupplierService(repo: repo).create(data);
-      } catch (_) {
+      } catch (e) {
+        print('SupplierService error: $e');
         final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
-        await repo.upsertSupplier(_supplierFromData(tempId, created: DateTime.now()));
+        final supplier = _supplierFromData(tempId, created: DateTime.now());
+        print('Supplier offline upsert: contactName=${supplier.contactName}, isActive=${supplier.isActive}');
+        await repo.upsertSupplier(supplier);
         await queue.enqueue(entityType: 'suppliers', operation: 'create',
             endpoint: 'suppliers', payload: {...data, '_tempId': tempId});
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(

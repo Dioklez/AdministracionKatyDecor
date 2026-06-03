@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/category_model.dart';
+import 'connectivity_service.dart';
 
 class CategoryService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class CategoryService {
   CategoryService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<Category>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getCategories()).map(_categoryFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('categories').getFullList(
             sort: 'name',

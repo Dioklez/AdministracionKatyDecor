@@ -2,6 +2,7 @@ import '../core/pocketbase_service.dart';
 import '../database/local_repository.dart';
 import '../database/app_database.dart';
 import '../models/supplier_product_model.dart';
+import 'connectivity_service.dart';
 
 class SupplierProductService {
   final _pb = PocketBaseService.instance.pb;
@@ -10,6 +11,12 @@ class SupplierProductService {
   SupplierProductService({LocalRepository? repo}) : _repo = repo;
 
   Future<List<SupplierProduct>> getAll() async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        return (await _repo.getSupplierProducts()).map(_productFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb
           .collection('supplier_products')
@@ -27,6 +34,13 @@ class SupplierProductService {
   }
 
   Future<List<SupplierProduct>> getBySupplier(String supplierId) async {
+    if (!ConnectivityService.currentlyOnline) {
+      if (_repo != null) {
+        final local = await _repo.getSupplierProductsBySupplier(supplierId);
+        return local.map(_productFromLocal).toList();
+      }
+      return [];
+    }
     try {
       final records = await _pb.collection('supplier_products').getFullList(
             filter: 'supplier = "$supplierId"',

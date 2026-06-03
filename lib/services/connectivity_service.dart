@@ -3,6 +3,13 @@ import 'package:flutter/material.dart';
 import '../core/pocketbase_service.dart';
 
 class ConnectivityService extends ChangeNotifier {
+  static ConnectivityService? _instance;
+  static bool get currentlyOnline => _instance?.isOnline ?? true;
+
+  ConnectivityService() {
+    _instance = this;
+  }
+
   bool _isOnline = true;
   bool get isOnline => _isOnline;
 
